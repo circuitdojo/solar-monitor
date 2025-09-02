@@ -52,8 +52,17 @@ impl DeviceProtocol for Eg4Pi30Rs485 {
 
     async fn discover_devices(&self, scan: &ScanConfig) -> Result<Vec<DiscoveredDevice>> {
         let mut out = Vec::new();
+        // Try common PI30 baud rates to improve discovery odds
+        let bauds: &[u32] = &[2400, 9600];
         for port in &scan.serial_ports {
-            if let Ok((id, name)) = try_qid(port, scan.timeout_seconds).await {
+            let mut identified: Option<(String, String, u32)> = None;
+            for &baud in bauds {
+                if let Ok((id, name)) = try_qid_baud(port, baud, scan.timeout_seconds).await {
+                    identified = Some((id, name, baud));
+                    break;
+                }
+            }
+            if let Some((id, name, baud)) = identified {
                 out.push(DiscoveredDevice {
                     id,
                     name,
@@ -61,7 +70,7 @@ impl DeviceProtocol for Eg4Pi30Rs485 {
                     protocol: "eg4-pi30-rs485".to_string(),
                     connection_params: HashMap::from([
                         ("serial_port".to_string(), port.clone()),
-                        ("baud_rate".to_string(), "9600".to_string()),
+                        ("baud_rate".to_string(), baud.to_string()),
                         ("data_bits".to_string(), "8".to_string()),
                         ("parity".to_string(), "none".to_string()),
                         ("stop_bits".to_string(), "1".to_string()),
@@ -225,6 +234,7 @@ impl Eg4ModbusConn {
         use tokio_modbus::prelude::rtu;
         use tokio_modbus::prelude::*;
         use tokio_serial::{DataBits, Parity, SerialStream, StopBits};
+        use tokio::time::{timeout, Duration};
         // Acquire per-port mutex to avoid concurrent access
         let lock = {
             let mut m = PORT_LOCKS.lock().unwrap();
@@ -241,7 +251,23 @@ impl Eg4ModbusConn {
             .timeout(std::time::Duration::from_secs(self.timeout_secs));
         let port = SerialStream::open(&builder)?;
         let mut ctx = rtu::attach_slave(port, Slave(self.unit_id));
-        let regs = ctx.read_input_registers(addr, qty).await??;
+        // Bound the Modbus read to avoid indefinite hangs
+        let regs = match timeout(
+            Duration::from_secs(self.timeout_secs),
+            ctx.read_input_registers(addr, qty),
+        )
+        .await
+        {
+            Ok(Ok(regs)) => regs,
+            Ok(Err(e)) => {
+                let _ = ctx.disconnect().await; // best-effort cleanup
+                return Err(anyhow!(e));
+            }
+            Err(_) => {
+                let _ = ctx.disconnect().await; // best-effort cleanup
+                return Err(anyhow!("modbus read timeout"));
+            }
+        }?;
         ctx.disconnect().await?;
         let mut data = Vec::with_capacity(regs.len() * 2);
         for r in regs {
@@ -256,13 +282,13 @@ impl DeviceConnection for Eg4ModbusConn {
     async fn read_data(&mut self) -> Result<DeviceData> {
         // Read 5 blocks of 40 input registers each as per shared mapping
         let b1 = self.read_input_registers(0, 40).await?;
-        let _b2 = self.read_input_registers(40, 40).await?;
-        let _b3 = self.read_input_registers(80, 40).await?;
-        let _b4 = self.read_input_registers(120, 40).await?;
+        let b2 = self.read_input_registers(40, 40).await?;
+        let b3 = self.read_input_registers(80, 40).await?;
+        let b4 = self.read_input_registers(120, 40).await?;
         let b5 = self.read_input_registers(160, 40).await?;
 
         let u16le = |s: &[u8]| -> u16 { u16::from_le_bytes([s[0], s[1]]) };
-        let _i16le = |s: &[u8]| -> i16 { i16::from_le_bytes([s[0], s[1]]) };
+        let i16le = |s: &[u8]| -> i16 { i16::from_le_bytes([s[0], s[1]]) };
         // b1 indices in bytes
         let vpv1 = u16le(&b1[2..4]) as f64 / 10.0;
         let vbat = u16le(&b1[8..10]) as f64 / 10.0;
@@ -286,20 +312,149 @@ impl DeviceConnection for Eg4ModbusConn {
             0.0
         };
 
+        // Additional metrics from further blocks
+        let vpv2 = u16le(&b1[4..6]) as f64 / 10.0;
+        let vpv3 = u16le(&b1[6..8]) as f64 / 10.0;
+        let vac_s = u16le(&b1[26..28]) as f64 / 10.0;
+        let vac_t = u16le(&b1[28..30]) as f64 / 10.0;
+        let linv_rms = u16le(&b1[36..38]) as f64 / 100.0;
+        let pf = u16le(&b1[38..40]) as f64 / 1000.0;
+        let veps_r = u16le(&b1[40..42]) as f64 / 10.0;
+        let veps_s = u16le(&b1[42..44]) as f64 / 10.0;
+        let veps_t = u16le(&b1[44..46]) as f64 / 10.0;
+        let feps = u16le(&b1[46..48]) as f64 / 100.0;
+        let peps = u16le(&b1[48..50]) as f64;
+        let seps = u16le(&b1[50..52]) as f64;
+        let ptogrid = u16le(&b1[52..54]) as f64;
+        let ptouser = u16le(&b1[54..56]) as f64;
+        let epv1_day = u16le(&b1[56..58]) as f64 / 10.0;
+        let epv2_day = u16le(&b1[58..60]) as f64 / 10.0;
+        let epv3_day = u16le(&b1[60..62]) as f64 / 10.0;
+        let einv_day = u16le(&b1[62..64]) as f64 / 10.0;
+        let erec_day = u16le(&b1[64..66]) as f64 / 10.0;
+        let echg_day = u16le(&b1[66..68]) as f64 / 10.0;
+        let edischg_day = u16le(&b1[68..70]) as f64 / 10.0;
+        let eeps_day = u16le(&b1[70..72]) as f64 / 10.0;
+        let etogrid_day = u16le(&b1[72..74]) as f64 / 10.0;
+        let etouser_day = u16le(&b1[74..76]) as f64 / 10.0;
+        let vbus1 = u16le(&b1[76..78]) as f64 / 10.0;
+        let vbus2 = u16le(&b1[78..80]) as f64 / 10.0;
+
+        // Totals and temps (b2)
+        let tinner = u16le(&b2[48..50]) as f64;
+        let tradiator1 = u16le(&b2[50..52]) as f64;
+        let tradiator2 = u16le(&b2[52..54]) as f64;
+        let tbat = u16le(&b2[54..56]) as f64;
+        let epv1_all = (u16le(&b2[0..2]) as u32 | ((u16le(&b2[2..4]) as u32) << 16)) as f64 / 10.0;
+        let epv2_all = (u16le(&b2[4..6]) as u32 | ((u16le(&b2[6..8]) as u32) << 16)) as f64 / 10.0;
+        let epv3_all = (u16le(&b2[8..10]) as u32 | ((u16le(&b2[10..12]) as u32) << 16)) as f64 / 10.0;
+        let einv_all = (u16le(&b2[12..14]) as u32 | ((u16le(&b2[14..16]) as u32) << 16)) as f64 / 10.0;
+        let erec_all = (u16le(&b2[16..18]) as u32 | ((u16le(&b2[18..20]) as u32) << 16)) as f64 / 10.0;
+        let echg_all = (u16le(&b2[20..22]) as u32 | ((u16le(&b2[22..24]) as u32) << 16)) as f64 / 10.0;
+        let edischg_all = (u16le(&b2[24..26]) as u32 | ((u16le(&b2[26..28]) as u32) << 16)) as f64 / 10.0;
+        let eeps_all = (u16le(&b2[28..30]) as u32 | ((u16le(&b2[30..32]) as u32) << 16)) as f64 / 10.0;
+        let etogrid_all = (u16le(&b2[32..34]) as u32 | ((u16le(&b2[34..36]) as u32) << 16)) as f64 / 10.0;
+        let etouser_all = (u16le(&b2[36..38]) as u32 | ((u16le(&b2[38..40]) as u32) << 16)) as f64 / 10.0;
+
+        // BMS current and cell stats (b3)
+        let bat_current_bms = i16le(&b3[36..38]) as f64 / 100.0;
+        let max_cell_v = u16le(&b3[42..44]) as f64 / 1000.0;
+        let min_cell_v = u16le(&b3[44..46]) as f64 / 1000.0;
+        let max_cell_t = i16le(&b3[46..48]) as f64 / 10.0;
+        let min_cell_t = i16le(&b3[48..50]) as f64 / 10.0;
+        let cycles_bms = u16le(&b3[52..54]) as f64;
+
+        // Generator and EPS (b4)
+        let gen_v = u16le(&b4[2..4]) as f64 / 10.0;
+        let gen_f = u16le(&b4[4..6]) as f64 / 100.0;
+        let gen_p = u16le(&b4[6..8]) as f64;
+        let eps_v_l1n = u16le(&b4[14..16]) as f64 / 10.0;
+        let eps_v_l2n = u16le(&b4[16..18]) as f64 / 10.0;
+        let peps_l1n = u16le(&b4[18..20]) as f64;
+        let peps_l2n = u16le(&b4[20..22]) as f64;
+
+        // Per-phase and load energy (b5)
+        let eload_day = u16le(&b5[22..24]) as f64 / 10.0;
+        let pinv_s = u16le(&b5[40..42]) as f64;
+        let pinv_t = u16le(&b5[42..44]) as f64;
+        let ptogrid_s = u16le(&b5[48..50]) as f64;
+        let ptogrid_t = u16le(&b5[50..52]) as f64;
+        let ptouser_s = u16le(&b5[52..54]) as f64;
+        let ptouser_t = u16le(&b5[54..56]) as f64;
+
         let now = chrono::Utc::now();
         let mut metrics = DeviceMetrics::default();
         metrics.pv_voltage = Some(vpv1);
         metrics.battery_voltage = Some(vbat);
-        metrics.battery_current = Some(batt_cur);
+        metrics.battery_current = Some(if bat_current_bms.abs() > 0.0 { bat_current_bms } else { batt_cur });
         metrics.battery_soc_percentage = Some(soc);
         metrics.grid_voltage = Some(vac_r);
         metrics.grid_frequency = Some(fac);
         metrics.output_power_watts = Some(if pload > 0.0 { pload } else { pinv });
         metrics.pv_power_watts = Some(pv_power);
-        metrics.device_temperature_celsius = None; // could map Tinner if desired
+        metrics.device_temperature_celsius = Some(tinner);
         metrics.custom_metrics.insert("pv1_power".into(), ppv1);
         metrics.custom_metrics.insert("pv2_power".into(), ppv2);
         metrics.custom_metrics.insert("pv3_power".into(), ppv3);
+        metrics.custom_metrics.insert("pv1_voltage".into(), vpv1);
+        metrics.custom_metrics.insert("pv2_voltage".into(), vpv2);
+        metrics.custom_metrics.insert("pv3_voltage".into(), vpv3);
+        metrics.custom_metrics.insert("grid_voltage_s".into(), vac_s);
+        metrics.custom_metrics.insert("grid_voltage_t".into(), vac_t);
+        metrics.custom_metrics.insert("inverter_rms_current".into(), linv_rms);
+        metrics.custom_metrics.insert("power_factor".into(), pf);
+        metrics.custom_metrics.insert("offgrid_voltage_r".into(), veps_r);
+        metrics.custom_metrics.insert("offgrid_voltage_s".into(), veps_s);
+        metrics.custom_metrics.insert("offgrid_voltage_t".into(), veps_t);
+        metrics.custom_metrics.insert("offgrid_frequency".into(), feps);
+        metrics.custom_metrics.insert("offgrid_power_active".into(), peps);
+        metrics.custom_metrics.insert("offgrid_power_apparent".into(), seps);
+        metrics.custom_metrics.insert("export_power".into(), ptogrid);
+        metrics.custom_metrics.insert("import_power".into(), ptouser);
+        metrics.custom_metrics.insert("pv1_day_kwh".into(), epv1_day);
+        metrics.custom_metrics.insert("pv2_day_kwh".into(), epv2_day);
+        metrics.custom_metrics.insert("pv3_day_kwh".into(), epv3_day);
+        metrics.custom_metrics.insert("inverter_day_kwh".into(), einv_day);
+        metrics.custom_metrics.insert("ac_charge_day_kwh".into(), erec_day);
+        metrics.custom_metrics.insert("charge_day_kwh".into(), echg_day);
+        metrics.custom_metrics.insert("discharge_day_kwh".into(), edischg_day);
+        metrics.custom_metrics.insert("offgrid_day_kwh".into(), eeps_day);
+        metrics.custom_metrics.insert("export_day_kwh".into(), etogrid_day);
+        metrics.custom_metrics.insert("import_day_kwh".into(), etouser_day);
+        metrics.custom_metrics.insert("bus1_voltage".into(), vbus1);
+        metrics.custom_metrics.insert("bus2_voltage".into(), vbus2);
+        metrics.custom_metrics.insert("pv1_total_kwh".into(), epv1_all);
+        metrics.custom_metrics.insert("pv2_total_kwh".into(), epv2_all);
+        metrics.custom_metrics.insert("pv3_total_kwh".into(), epv3_all);
+        metrics.custom_metrics.insert("inverter_total_kwh".into(), einv_all);
+        metrics.custom_metrics.insert("ac_charge_total_kwh".into(), erec_all);
+        metrics.custom_metrics.insert("charge_total_kwh".into(), echg_all);
+        metrics.custom_metrics.insert("discharge_total_kwh".into(), edischg_all);
+        metrics.custom_metrics.insert("offgrid_total_kwh".into(), eeps_all);
+        metrics.custom_metrics.insert("export_total_kwh".into(), etogrid_all);
+        metrics.custom_metrics.insert("import_total_kwh".into(), etouser_all);
+        metrics.custom_metrics.insert("battery_temp_c".into(), tbat);
+        metrics.custom_metrics.insert("heatsink_temp1_c".into(), tradiator1);
+        metrics.custom_metrics.insert("heatsink_temp2_c".into(), tradiator2);
+        metrics.custom_metrics.insert("bms_max_cell_v".into(), max_cell_v);
+        metrics.custom_metrics.insert("bms_min_cell_v".into(), min_cell_v);
+        metrics.custom_metrics.insert("bms_max_cell_t_c".into(), max_cell_t);
+        metrics.custom_metrics.insert("bms_min_cell_t_c".into(), min_cell_t);
+        metrics.custom_metrics.insert("bms_cycles".into(), cycles_bms);
+        metrics.custom_metrics.insert("gen_voltage".into(), gen_v);
+        metrics.custom_metrics.insert("gen_frequency".into(), gen_f);
+        metrics.custom_metrics.insert("gen_power".into(), gen_p);
+        metrics.custom_metrics.insert("eps_voltage_l1n".into(), eps_v_l1n);
+        metrics.custom_metrics.insert("eps_voltage_l2n".into(), eps_v_l2n);
+        metrics.custom_metrics.insert("eps_power_l1n".into(), peps_l1n);
+        metrics.custom_metrics.insert("eps_power_l2n".into(), peps_l2n);
+        metrics.custom_metrics.insert("load_day_kwh".into(), eload_day);
+        metrics.custom_metrics.insert("inverter_power_s".into(), pinv_s);
+        metrics.custom_metrics.insert("inverter_power_t".into(), pinv_t);
+        metrics.custom_metrics.insert("export_power_s".into(), ptogrid_s);
+        metrics.custom_metrics.insert("export_power_t".into(), ptogrid_t);
+        metrics.custom_metrics.insert("import_power_s".into(), ptouser_s);
+        metrics.custom_metrics.insert("import_power_t".into(), ptouser_t);
 
         let status = DeviceStatus {
             is_connected: true,
@@ -337,6 +492,7 @@ async fn try_read_basic_modbus(
     use tokio_modbus::prelude::rtu;
     use tokio_modbus::prelude::*;
     use tokio_serial::{DataBits, Parity, SerialStream, StopBits};
+    use tokio::time::{timeout, Duration};
     // Acquire per-port mutex to avoid concurrent use during discovery too
     let lock = {
         let mut m = PORT_LOCKS.lock().unwrap();
@@ -352,7 +508,20 @@ async fn try_read_basic_modbus(
         .timeout(std::time::Duration::from_secs(timeout_secs));
     let port = SerialStream::open(&builder)?;
     let mut ctx = rtu::attach_slave(port, Slave(unit_id));
-    let _ = ctx.read_input_registers(0, 2).await??;
+    // Bound the Modbus read with an explicit timeout to avoid hanging discovery
+    match timeout(Duration::from_secs(timeout_secs), ctx.read_input_registers(0, 2)).await {
+        Ok(Ok(_)) => {
+            // success
+        }
+        Ok(Err(e)) => {
+            let _ = ctx.disconnect().await; // best-effort cleanup
+            return Err(anyhow!(e));
+        }
+        Err(_) => {
+            let _ = ctx.disconnect().await; // best-effort cleanup
+            return Err(anyhow!("modbus read timeout"));
+        }
+    }
     ctx.disconnect().await?;
     Ok(())
 }
@@ -533,12 +702,12 @@ fn parse_qpigs_to_metrics(resp: &str) -> Result<DeviceMetrics> {
     })
 }
 
-async fn try_qid(port: &str, timeout_secs: u32) -> Result<(String, String)> {
+async fn try_qid_baud(port: &str, baud: u32, timeout_secs: u32) -> Result<(String, String)> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::time::{timeout, Duration};
     use tokio_serial::SerialPortBuilderExt;
 
-    let builder = tokio_serial::new(port, 9600)
+    let builder = tokio_serial::new(port, baud)
         .data_bits(tokio_serial::DataBits::Eight)
         .parity(tokio_serial::Parity::None)
         .stop_bits(tokio_serial::StopBits::One)

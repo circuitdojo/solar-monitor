@@ -98,21 +98,35 @@ async fn main() -> Result<()> {
                 Err(_) => Vec::new(),
             }
         };
+        if ports.is_empty() {
+            println!("No serial ports found. Try --serial-ports or check permissions (dialout group).");
+            return Ok(());
+        }
+
+        println!("Scanning ports: {}", ports.join(","));
         let scan = solar_monitor_core::ScanConfig { serial_ports: ports, timeout_seconds: cli.timeout };
-        if let Some(proto) = state.registry.get_protocol("eg4-pi30-rs485") {
-            let found = proto.discover_devices(&scan).await.unwrap_or_default();
-            if found.is_empty() {
-                println!("No devices discovered");
-            } else {
-                println!("Discovered {} device(s):", found.len());
-                for d in found {
-                    println!("- {} ({:?}) via {}", d.name, d.device_type, d.protocol);
-                    println!("  id: {}", d.id);
-                    println!("  params: {:?}", d.connection_params);
-                }
+
+        // Only try Modbus RTU per current focus (PI30 skipped)
+        println!("Skipping PI30 discovery");
+        println!("Probing Modbus RTU (unit ids 1..3)...");
+        let mut discovered = Vec::new();
+        if let Some(proto) = state.registry.get_protocol("eg4-6000xp-modbus") {
+            let mut found = proto.discover_devices(&scan).await.unwrap_or_default();
+            if !found.is_empty() {
+                println!("Found {} device(s) via eg4-6000xp-modbus", found.len());
             }
+            discovered.append(&mut found);
+        }
+
+        if discovered.is_empty() {
+            println!("No devices discovered");
         } else {
-            println!("Protocol eg4-pi30-rs485 not available");
+            println!("Discovered {} device(s):", discovered.len());
+            for d in discovered {
+                println!("- {} ({:?}) via {}", d.name, d.device_type, d.protocol);
+                println!("  id: {}", d.id);
+                println!("  params: {:?}", d.connection_params);
+            }
         }
         return Ok(());
     }

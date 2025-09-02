@@ -2333,6 +2333,25 @@ impl DeviceManager {
         connections.keys().cloned().collect()
     }
 }
+
+#### 6.3a Serial Port Manager (RTU Bus)
+
+On Modbus RTU and other serial bus protocols, multiple devices may share the same physical port. To prevent frame collisions and "device busy" errors when background polling and ad‑hoc commands (via the API) occur simultaneously, we introduce a port‑level manager:
+
+- Purpose: serialize access to a serial device path (e.g., `/dev/ttyUSB0`) across all tasks.
+- Model: actor per serial port with a bounded MPSC request channel. Each request contains:
+  - Target `unit_id` (slave), function (read/write), address/count/payload
+  - A oneshot sender to deliver the response back to the caller
+- Behavior:
+  - Opens the serial port lazily on first request; reopens on I/O errors
+  - Applies per‑request timeouts and backoff on errors; validates CRC/frames
+  - Ensures strict in‑order serialization of requests on the bus
+- Integration:
+  - Protocol drivers (e.g., `eg4-6000xp-modbus`) send requests through the port manager rather than opening the port directly
+  - API command endpoints and the polling loop share the same manager automatically, avoiding race conditions
+- Minimal alternative: a per‑port async mutex guarding one‑shot open‑use‑disconnect transactions (implemented initially), with a future upgrade path to a full actor.
+
+This design keeps `DeviceConnection: Send + Sync` without holding non‑Sync RTU contexts in state, and it scales to multi‑drop RS485 scenarios while keeping latency predictable.
 ```
 
 #### 6.4 Main Application
