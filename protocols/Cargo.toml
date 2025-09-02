@@ -1,0 +1,14 @@
+[package]
+name = "solar-monitor-protocols"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "solar_monitor_protocols"
+path = "src/lib.rs"
+
+[dependencies]
+solar-monitor-core = { path = "../core" }
+anyhow = "1.0"
+tracing = "0.1"
+async-trait = "0.1"

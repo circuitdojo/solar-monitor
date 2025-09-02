@@ -1,0 +1,18 @@
+[package]
+name = "contracts"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "contracts"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.7", features = ["serde", "v4"] }
+specta = { version = "1.0", features = ["typescript", "chrono", "export"] }
+specta-typescript = "0.0.9"
+
+[build-dependencies]
+specta = "1.0"

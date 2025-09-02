@@ -1,0 +1,10 @@
+[workspace]
+resolver = "2"
+members = [
+  "contracts",
+  "core",
+  "protocols",
+  "storage",
+  "api",
+  "bin",
+]
