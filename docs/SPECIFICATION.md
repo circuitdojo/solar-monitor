@@ -47,7 +47,7 @@ A device-agnostic, single-binary solar monitoring solution for inverters, batter
 ### Technology Stack
 - Backend: Rust with Tokio, Axum, SQLx, tokio-serial (RS485 first)
 - Database: SQLite (embedded, single file)
-- Frontend: Preact + TypeScript (embedded in binary)
+- Frontend: Preact + TypeScript + Tailwind CSS (embedded in binary)
 - Types: Specta for Rust/TypeScript synchronization
 - Deployment: Single binary with systemd service
 
@@ -252,6 +252,7 @@ opt-level = "z" # Optimize for size
 
 ### Embedded Assets
 - Frontend built into binary using `rust-embed`
+- Tailwind CSS built via Vite/PostCSS and included in the embedded assets
 - Default configuration embedded
 - Database migrations embedded (sqlx::migrate!)
 - No external files required at runtime

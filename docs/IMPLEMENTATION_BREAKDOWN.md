@@ -1566,6 +1566,49 @@ export interface DeviceMetrics {
   loadPercentage?: number;
   
   // Battery metrics
+
+```
+
+**File: `web/tailwind.config.js`**
+```js
+/** @type {import("tailwindcss").Config} */
+export default {
+  content: [
+    './index.html',
+    './src/**/*.{ts,tsx}',
+  ],
+  theme: {
+    extend: {},
+  },
+  plugins: [],
+};
+```
+
+**File: `web/postcss.config.js`**
+```js
+export default {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {},
+  },
+};
+```
+
+**File: `web/src/index.css`**
+```css
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* App globals */
+html, body, #app { height: 100%; }
+body { @apply bg-slate-50 text-slate-900; }
+```
+
+Import `index.css` in your web entry (e.g., `web/src/main.tsx`):
+```ts
+import './index.css';
+```
   batteryVoltage?: number;
   batteryCurrent?: number;
   batterySocPercentage?: number;
