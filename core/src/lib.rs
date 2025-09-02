@@ -96,4 +96,3 @@ impl ProtocolRegistry {
         self.metadata.values().collect()
     }
 }
-

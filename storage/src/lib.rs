@@ -3,6 +3,7 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use contracts::{DeviceData, DeviceMetrics, DeviceStatus, DeviceType, HealthStatus};
+use solar_monitor_core::DeviceConfig;
 use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::SqlitePool;
 
@@ -35,21 +36,21 @@ impl DataStore {
     pub async fn store_device_data(&self, data: &DeviceData) -> Result<()> {
         let metrics_json = serde_json::to_string(&data.metrics)?;
         let status_json = serde_json::to_string(&data.status)?;
-        let device_type_str = device_type_to_str(data.device_type);
+        let device_type_str = device_type_to_str(data.device_type.clone());
 
-        sqlx::query!(
+        sqlx::query(
             r#"
             INSERT INTO device_data (
                 device_id, timestamp, device_type, metrics, status, raw_data
             ) VALUES (?, ?, ?, ?, ?, ?)
             "#,
-            data.device_id,
-            data.timestamp,
-            device_type_str,
-            metrics_json,
-            status_json,
-            data.raw_data
         )
+        .bind(&data.device_id)
+        .bind(data.timestamp)
+        .bind(&device_type_str)
+        .bind(&metrics_json)
+        .bind(&status_json)
+        .bind(&data.raw_data)
         .execute(&self.pool)
         .await?;
 
@@ -57,14 +58,12 @@ impl DataStore {
     }
 
     pub async fn get_latest_device_data(&self, device_id: &str) -> Result<Option<DeviceData>> {
-        let row = sqlx::query!(
-            "SELECT * FROM device_data WHERE device_id = ? ORDER BY timestamp DESC LIMIT 1",
-            device_id
-        )
-        .fetch_optional(&self.pool)
-        .await?;
+        let row = sqlx::query("SELECT * FROM device_data WHERE device_id = ? ORDER BY timestamp DESC LIMIT 1")
+            .bind(device_id)
+            .fetch_optional(&self.pool)
+            .await?;
 
-        Ok(row.map(|r| row_to_device_data(r)))
+        Ok(row.map(row_to_device_data))
     }
 
     pub async fn get_device_data_range(
@@ -76,22 +75,128 @@ impl DataStore {
     ) -> Result<Vec<DeviceData>> {
         let limit = limit.unwrap_or(1000).min(10_000);
 
-        let rows = sqlx::query!(
+        let rows = sqlx::query(
             r#"
             SELECT * FROM device_data
             WHERE device_id = ? AND timestamp BETWEEN ? AND ?
             ORDER BY timestamp ASC
             LIMIT ?
             "#,
-            device_id,
-            start_time,
-            end_time,
-            limit as i64
         )
+        .bind(device_id)
+        .bind(start_time)
+        .bind(end_time)
+        .bind(limit as i64)
         .fetch_all(&self.pool)
         .await?;
 
         Ok(rows.into_iter().map(row_to_device_data).collect())
+    }
+
+    // Device config persistence
+    pub async fn upsert_device_config(&self, cfg: &DeviceConfig) -> Result<()> {
+        let dtype = device_type_to_str(cfg.device_type.clone());
+        let params = serde_json::to_string(&cfg.connection_params)?;
+        sqlx::query(
+            r#"
+            INSERT INTO devices (id, name, device_type, protocol, connection_params, enabled, poll_interval_seconds)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                name=excluded.name,
+                device_type=excluded.device_type,
+                protocol=excluded.protocol,
+                connection_params=excluded.connection_params,
+                enabled=excluded.enabled,
+                poll_interval_seconds=excluded.poll_interval_seconds
+            "#,
+        )
+        .bind(&cfg.id)
+        .bind(&cfg.name)
+        .bind(&dtype)
+        .bind(&cfg.protocol)
+        .bind(&params)
+        .bind(cfg.enabled as i32)
+        .bind(cfg.poll_interval_seconds as i64)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn delete_device_config(&self, id: &str) -> Result<()> {
+        sqlx::query("DELETE FROM devices WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn list_device_configs(&self) -> Result<Vec<DeviceConfig>> {
+        let rows = sqlx::query("SELECT * FROM devices ORDER BY created_at ASC")
+            .fetch_all(&self.pool)
+            .await?;
+        use sqlx::Row;
+        let mut out = Vec::new();
+        for r in rows {
+            let id: String = r.get("id");
+            let name: String = r.get("name");
+            let dt: String = r.get("device_type");
+            let protocol: String = r.get("protocol");
+            let params: String = r.get("connection_params");
+            let enabled: i64 = r.get("enabled");
+            let poll: i64 = r.get("poll_interval_seconds");
+            let device_type = match dt.as_str() {
+                "solarinverter" => DeviceType::SolarInverter,
+                "batterysystem" => DeviceType::BatterySystem,
+                "chargecontroller" => DeviceType::ChargeController,
+                "energymeter" => DeviceType::EnergyMeter,
+                _ => DeviceType::SolarInverter,
+            };
+            let connection_params: std::collections::HashMap<String, String> = serde_json::from_str(&params).unwrap_or_default();
+            out.push(DeviceConfig {
+                id,
+                name,
+                device_type,
+                protocol,
+                connection_params,
+                enabled: enabled != 0,
+                poll_interval_seconds: poll as u32,
+            });
+        }
+        Ok(out)
+    }
+
+    pub async fn get_device_config(&self, id: &str) -> Result<Option<DeviceConfig>> {
+        let row = sqlx::query("SELECT * FROM devices WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.map(|r| {
+            use sqlx::Row;
+            let id: String = r.get("id");
+            let name: String = r.get("name");
+            let dt: String = r.get("device_type");
+            let protocol: String = r.get("protocol");
+            let params: String = r.get("connection_params");
+            let enabled: i64 = r.get("enabled");
+            let poll: i64 = r.get("poll_interval_seconds");
+            let device_type = match dt.as_str() {
+                "solarinverter" => DeviceType::SolarInverter,
+                "batterysystem" => DeviceType::BatterySystem,
+                "chargecontroller" => DeviceType::ChargeController,
+                "energymeter" => DeviceType::EnergyMeter,
+                _ => DeviceType::SolarInverter,
+            };
+            let connection_params: std::collections::HashMap<String, String> = serde_json::from_str(&params).unwrap_or_default();
+            DeviceConfig {
+                id,
+                name,
+                device_type,
+                protocol,
+                connection_params,
+                enabled: enabled != 0,
+                poll_interval_seconds: poll as u32,
+            }
+        }))
     }
 }
 
@@ -142,4 +247,3 @@ fn device_type_to_str(dt: DeviceType) -> String {
     }
     .to_string()
 }
-

@@ -10,7 +10,13 @@ path = "src/lib.rs"
 [dependencies]
 solar-monitor-core = { path = "../core" }
 contracts = { path = "../contracts" }
-axum = { version = "0.7", default-features = false, features = ["macros", "ws"] }
+solar-monitor-protocols = { path = "../protocols" }
+solar-monitor-storage = { path = "../storage" }
+axum = { version = "0.7", default-features = false, features = ["macros", "ws", "json"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 anyhow = "1.0"
+serialport = "4.4"
+tokio = { version = "1.37", features = ["rt-multi-thread", "macros", "time"] }
+tracing = "0.1"
+chrono = { version = "0.4", features = ["serde"] }

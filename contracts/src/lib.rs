@@ -88,6 +88,19 @@ pub struct DeviceConfigDto {
     pub connection_params: HashMap<String, String>,
 }
 
+#[derive(Type, Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceListItemDto {
+    pub id: String,
+    pub name: String,
+    pub device_type: DeviceType,
+    pub protocol_name: String,
+    pub enabled: bool,
+    pub poll_interval_seconds: u32,
+    pub connection_params: std::collections::HashMap<String, String>,
+    pub is_polling: bool,
+}
+
 // API DTOs commonly used by the web layer
 
 #[derive(Type, Debug, Clone, Serialize, Deserialize)]
@@ -103,6 +116,18 @@ pub struct TestConnectionParamsDto {
 pub struct TestConnectionResponseDto {
     pub ok: bool,
     pub message: Option<String>,
+}
+
+#[derive(Type, Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddDeviceRequestDto {
+    pub id: String,
+    pub name: String,
+    pub device_type: DeviceType,
+    pub protocol_name: String,
+    pub enabled: bool,
+    pub poll_interval_seconds: u32,
+    pub connection_params: HashMap<String, String>,
 }
 
 #[derive(Type, Debug, Clone, Serialize, Deserialize)]

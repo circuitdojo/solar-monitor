@@ -8,11 +8,11 @@ name = "solar-monitor"
 path = "src/main.rs"
 
 [dependencies]
+contracts = { path = "../contracts" }
 solar-monitor-core = { path = "../core" }
 solar-monitor-protocols = { path = "../protocols" }
 solar-monitor-storage = { path = "../storage" }
 solar-monitor-api = { path = "../api" }
-axum = { version = "0.7", default-features = false, features = ["macros"] }
+axum = { version = "0.7", default-features = false, features = ["tokio", "http1", "ws", "macros", "json"] }
 tokio = { version = "1.37", features = ["rt-multi-thread", "macros"] }
 anyhow = "1.0"
-

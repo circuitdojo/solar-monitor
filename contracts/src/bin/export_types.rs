@@ -27,6 +27,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     out.push_str("\n\n");
     out.push_str(&ts::export::<DeviceConfigDto>(&conf)?);
     out.push_str("\n\n");
+    out.push_str(&ts::export::<AddDeviceRequestDto>(&conf)?);
+    out.push_str("\n\n");
+    out.push_str(&ts::export::<DeviceListItemDto>(&conf)?);
+    out.push_str("\n\n");
     out.push_str(&ts::export::<TestConnectionParamsDto>(&conf)?);
     out.push_str("\n\n");
     out.push_str(&ts::export::<TestConnectionResponseDto>(&conf)?);
@@ -38,6 +42,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     out.push_str(&ts::export::<SystemStatusDto>(&conf)?);
     out.push_str("\n\n");
     out.push_str(&ts::export::<ErrorResponseDto>(&conf)?);
+    out.push_str("\n\n");
+    out.push_str(&ts::export::<AddDeviceRequestDto>(&conf)?);
+    out.push_str("\n\n");
+    out.push_str(&ts::export::<DeviceListItemDto>(&conf)?);
 
     let path = out_dir.join("index.ts");
     fs::write(&path, out)?;
