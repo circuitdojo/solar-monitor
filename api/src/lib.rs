@@ -3,8 +3,8 @@
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
-use axum::{Json, Router};
 use axum::{http::StatusCode, response::Response};
+use axum::{Json, Router};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -28,7 +28,9 @@ pub enum ApiError {
 }
 
 impl From<anyhow::Error> for ApiError {
-    fn from(e: anyhow::Error) -> Self { Self::Internal(e.to_string()) }
+    fn from(e: anyhow::Error) -> Self {
+        Self::Internal(e.to_string())
+    }
 }
 
 impl IntoResponse for ApiError {
@@ -168,7 +170,11 @@ async fn discover_devices(
     };
 
     let mut found = Vec::new();
-    if let Some(proto) = state.registry.get_protocol("eg4-pi30-rs485") {
+    if let Some(proto) = state
+        .registry
+        .get_protocol("eg4-6000xp-modbus")
+        .or_else(|| state.registry.get_protocol("eg4-pi30-rs485"))
+    {
         let devices = proto
             .discover_devices(&scan)
             .await
@@ -224,7 +230,9 @@ async fn add_device(
     Json(req): Json<contracts::AddDeviceRequestDto>,
 ) -> ApiResult<Json<serde_json::Value>> {
     if !req.enabled {
-        return Ok(Json(serde_json::json!({ "status": "disabled", "id": req.id })));
+        return Ok(Json(
+            serde_json::json!({ "status": "disabled", "id": req.id }),
+        ));
     }
 
     // Build core config
@@ -386,15 +394,19 @@ async fn system_status(
     // System metrics via sysinfo
     let mut sys = sysinfo::System::new_all();
     sys.refresh_memory();
-    sys.refresh_cpu();
+    sys.refresh_cpu_all();
 
     // Memory percent
     let total_mem = sys.total_memory() as f64; // in KiB
-    let used_mem = sys.used_memory() as f64;   // in KiB
-    let mem_percent = if total_mem > 0.0 { (used_mem / total_mem) * 100.0 } else { 0.0 };
+    let used_mem = sys.used_memory() as f64; // in KiB
+    let mem_percent = if total_mem > 0.0 {
+        (used_mem / total_mem) * 100.0
+    } else {
+        0.0
+    };
 
     // CPU percent
-    let cpu_percent = sys.global_cpu_info().cpu_usage() as f64; // 0..100
+    let cpu_percent = sys.global_cpu_usage() as f64; // 0..100
 
     // Disk usage (sum of all disks)
     let mut total_space: u128 = 0;
@@ -408,7 +420,11 @@ async fn system_status(
     let used_space = total_space.saturating_sub(avail_space);
     let used_mb = (used_space as f64) / (1024.0 * 1024.0);
     let total_mb = (total_space as f64) / (1024.0 * 1024.0);
-    let disk_percent = if total_mb > 0.0 { (used_mb / total_mb) * 100.0 } else { 0.0 };
+    let disk_percent = if total_mb > 0.0 {
+        (used_mb / total_mb) * 100.0
+    } else {
+        0.0
+    };
 
     let status = contracts::SystemStatusDto {
         uptime_seconds: uptime.num_seconds() as u64,
@@ -417,9 +433,23 @@ async fn system_status(
         active_connections,
         active_clients,
         data_points_per_second: estimated_rate,
-        memory_usage: contracts::ResourceUsageDto { current: mem_percent, peak: 0.0, average: 0.0, unit: "percent".into() },
-        cpu_usage: contracts::ResourceUsageDto { current: cpu_percent, peak: 0.0, average: 0.0, unit: "percent".into() },
-        storage_usage: contracts::StorageUsageDto { used_mb, total_mb, percent: disk_percent },
+        memory_usage: contracts::ResourceUsageDto {
+            current: mem_percent,
+            peak: 0.0,
+            average: 0.0,
+            unit: "percent".into(),
+        },
+        cpu_usage: contracts::ResourceUsageDto {
+            current: cpu_percent,
+            peak: 0.0,
+            average: 0.0,
+            unit: "percent".into(),
+        },
+        storage_usage: contracts::StorageUsageDto {
+            used_mb,
+            total_mb,
+            percent: disk_percent,
+        },
     };
     Ok(Json(status))
 }
@@ -431,18 +461,20 @@ async fn list_protocols(
         .registry
         .list_protocols()
         .into_iter()
-        .map(|m| serde_json::json!({
-            "name": m.name,
-            "version": m.version,
-            "description": m.description,
-            "supportedDeviceTypes": m.supported_device_types,
-            "capabilities": {
-                "supportsDiscovery": m.capabilities.supports_discovery,
-                "supportsCommands": m.capabilities.supports_commands,
-                "supportsRealTime": m.capabilities.supports_real_time,
-                "maxConcurrentConnections": m.capabilities.max_concurrent_connections,
-            }
-        }))
+        .map(|m| {
+            serde_json::json!({
+                "name": m.name,
+                "version": m.version,
+                "description": m.description,
+                "supportedDeviceTypes": m.supported_device_types,
+                "capabilities": {
+                    "supportsDiscovery": m.capabilities.supports_discovery,
+                    "supportsCommands": m.capabilities.supports_commands,
+                    "supportsRealTime": m.capabilities.supports_real_time,
+                    "maxConcurrentConnections": m.capabilities.max_concurrent_connections,
+                }
+            })
+        })
         .collect::<Vec<_>>();
     Ok(Json(serde_json::json!({"protocols": protos})))
 }
@@ -485,18 +517,28 @@ async fn update_device(
 
     // Restart task if enabled, stop if disabled
     if !cfg.enabled {
-        if let Some(h) = state.tasks.lock().await.remove(&cfg.id) { h.abort(); }
+        if let Some(h) = state.tasks.lock().await.remove(&cfg.id) {
+            h.abort();
+        }
     } else {
         // replace in-memory config
-        state.devices.lock().await.insert(cfg.id.clone(), cfg.clone());
-        start_polling(state.clone(), cfg).await.map_err(|e| ApiError::Internal(e.to_string()))?;
+        state
+            .devices
+            .lock()
+            .await
+            .insert(cfg.id.clone(), cfg.clone());
+        start_polling(state.clone(), cfg)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
     }
     Ok(Json(serde_json::json!({"status":"updated","id": id })))
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct CommandRequest { command: String }
+struct CommandRequest {
+    command: String,
+}
 
 async fn send_device_command(
     axum::extract::State(state): axum::extract::State<Arc<AppState>>,
@@ -526,7 +568,11 @@ async fn send_device_command(
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct RangeQuery { start: Option<String>, end: Option<String>, limit: Option<u32> }
+struct RangeQuery {
+    start: Option<String>,
+    end: Option<String>,
+    limit: Option<u32>,
+}
 
 async fn get_device_data_range(
     axum::extract::State(state): axum::extract::State<Arc<AppState>>,
@@ -566,7 +612,9 @@ async fn dashboard_data(
     let mut out = Vec::new();
     for cfg in configs {
         if let Ok(opt) = state.store.get_latest_device_data(&cfg.id).await {
-            if let Some(d) = opt { out.push(d); }
+            if let Some(d) = opt {
+                out.push(d);
+            }
         }
     }
     Ok(Json(out))
@@ -603,13 +651,19 @@ async fn import_devices(
             .upsert_device_config(&cfg)
             .await
             .map_err(|e| ApiError::Internal(e.to_string()))?;
-        state.devices.lock().await.insert(cfg.id.clone(), cfg.clone());
+        state
+            .devices
+            .lock()
+            .await
+            .insert(cfg.id.clone(), cfg.clone());
         if cfg.enabled {
             let _ = start_polling(state.clone(), cfg).await;
         }
         imported += 1;
     }
-    Ok(Json(serde_json::json!({"status":"ok","imported": imported})))
+    Ok(Json(
+        serde_json::json!({"status":"ok","imported": imported}),
+    ))
 }
 
 fn to_dto(c: &core::DeviceConfig) -> contracts::DeviceConfigDto {

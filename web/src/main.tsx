@@ -105,9 +105,10 @@ function AddDeviceModal({ onClose, onSaved }: AddDeviceProps) {
   const [id, setId] = useState('')
   const [name, setName] = useState('')
   const [deviceType, setDeviceType] = useState<DeviceListItemDto['deviceType']>('SolarInverter')
-  const [protocolName, setProtocolName] = useState('eg4-pi30-rs485')
+  const [protocolName, setProtocolName] = useState('eg4-6000xp-modbus')
   const [serialPort, setSerialPort] = useState('')
   const [baudRate, setBaudRate] = useState('9600')
+  const [unitId, setUnitId] = useState('1')
   const [pollInterval, setPollInterval] = useState(30)
   const [enabled, setEnabled] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -125,7 +126,7 @@ function AddDeviceModal({ onClose, onSaved }: AddDeviceProps) {
       protocolName,
       enabled,
       pollIntervalSeconds: pollInterval,
-      connectionParams: { serial_port: serialPort, baud_rate: baudRate }
+      connectionParams: { serial_port: serialPort, baud_rate: baudRate, unit_id: unitId }
     }
     const res = await fetch('/api/v1/devices', {
       method: 'POST',
@@ -173,6 +174,10 @@ function AddDeviceModal({ onClose, onSaved }: AddDeviceProps) {
             <div>
               <label class="block text-sm text-slate-600">Baud Rate</label>
               <input class="w-full border rounded px-2 py-1" value={baudRate} onInput={(e: any) => setBaudRate(e.target.value)} />
+            </div>
+            <div>
+              <label class="block text-sm text-slate-600">Unit ID</label>
+              <input class="w-full border rounded px-2 py-1" value={unitId} onInput={(e: any) => setUnitId(e.target.value)} />
             </div>
             <div>
               <label class="block text-sm text-slate-600">Poll Interval (s)</label>

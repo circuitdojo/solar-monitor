@@ -190,7 +190,7 @@ async fn devices_crud_and_errors() {
         "id": "dev1",
         "name": "Inverter A",
         "deviceType": "solarInverter",
-        "protocolName": "eg4-pi30-rs485",
+        "protocolName": "eg4-6000xp-modbus",
         "enabled": false,
         "pollIntervalSeconds": 30,
         "connectionParams": {"serial_port": "/dev/ttyS1", "baud_rate": "9600"}
@@ -211,7 +211,7 @@ async fn devices_crud_and_errors() {
         "id": "dev1",
         "name": "Inverter A2",
         "deviceType": "solarInverter",
-        "protocolName": "eg4-pi30-rs485",
+        "protocolName": "eg4-6000xp-modbus",
         "enabled": false,
         "pollIntervalSeconds": 60,
         "connectionParams": {"serial_port": "/dev/ttyS1", "baud_rate": "9600"}
@@ -321,7 +321,7 @@ async fn import_export_round_trip() {
             "id": "devA",
             "name": "Alpha",
             "deviceType": "solarInverter",
-            "protocolName": "eg4-pi30-rs485",
+            "protocolName": "eg4-6000xp-modbus",
             "enabled": false,
             "pollIntervalSeconds": 15,
             "connectionParams": {"serial_port": "/dev/ttyS10", "baud_rate": "9600"}
@@ -330,7 +330,7 @@ async fn import_export_round_trip() {
             "id": "devB",
             "name": "Beta",
             "deviceType": "solarInverter",
-            "protocolName": "eg4-pi30-rs485",
+            "protocolName": "eg4-6000xp-modbus",
             "enabled": false,
             "pollIntervalSeconds": 30,
             "connectionParams": {"serial_port": "/dev/ttyS11", "baud_rate": "9600"}
@@ -355,7 +355,7 @@ async fn import_export_round_trip() {
     let a = arr.iter().find(|x| x["id"] == "devA").unwrap();
     assert_eq!(a["name"], "Alpha");
     assert_eq!(a["deviceType"], "solarInverter");
-    assert_eq!(a["protocolName"], "eg4-pi30-rs485");
+    assert_eq!(a["protocolName"], "eg4-6000xp-modbus");
     assert_eq!(a["enabled"], false);
     assert_eq!(a["pollIntervalSeconds"], 15);
     assert!(a["connectionParams"].is_object());

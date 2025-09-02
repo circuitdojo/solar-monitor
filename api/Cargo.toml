@@ -25,9 +25,9 @@ serialport = "4.4"
 tokio = { version = "1.37", features = ["rt-multi-thread", "macros", "time"] }
 tracing = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
-tower-http = { version = "0.5", features = ["fs"] }
+tower-http = { version = "0.6", features = ["fs"] }
 mime_guess = "2.0"
-sysinfo = { version = "0.30" }
+sysinfo = { version = "0.37" }
 
 [features]
 embed-frontend = ["rust-embed"]
