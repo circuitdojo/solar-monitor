@@ -1,11 +1,13 @@
 # Deployment & Operations - Edge Device Specification
 
 ## Overview
+
 Single-binary deployment specification optimized for Raspberry Pi and Nucbox edge devices. Focuses on simplicity, reliability, and minimal operational overhead.
 
 ## Single Binary Architecture
 
 ### 1. Single Binary Architecture
+
 ```rust
 // All-in-one binary with embedded assets
 use rust_embed::RustEmbed;
@@ -26,13 +28,13 @@ pub struct EmbeddedMigrations;
 pub struct SolarMonitor {
     /// Simple device manager
     device_manager: DeviceManager,
-    
+
     /// Web server (API + static files)
     web_server: Arc<WebServer>,
-    
+
     /// Local SQLite database
     database: Arc<DataStore>,
-    
+
     /// System configuration
     config: SystemConfig,
 }
@@ -42,14 +44,14 @@ impl SolarMonitor {
         // Initialize with embedded defaults
         let config = Self::load_or_create_config().await?;
         let database = Arc::new(SqliteDatabase::new(&config.database_path).await?);
-        
+
         // Run embedded migrations
         Self::run_migrations(&database).await?;
-        
+
         // Initialize all components
         let engine = Arc::new(CoreEngine::new(config.clone()).await?);
         let web_server = Arc::new(WebServer::new(config.clone(), engine.clone()).await?);
-        
+
         Ok(Self {
             engine,
             web_server,
@@ -61,12 +63,12 @@ impl SolarMonitor {
 
     pub async fn run(&self) -> Result<()> {
         tracing::info!("Starting Solar Monitor v{}", env!("CARGO_PKG_VERSION"));
-        
+
         // Start all components
         let engine_handle = self.start_engine();
         let web_handle = self.start_web_server();
         let health_handle = self.start_health_monitoring();
-        
+
         // Wait for shutdown signal
         tokio::select! {
             _ = engine_handle => tracing::info!("Engine stopped"),
@@ -77,28 +79,28 @@ impl SolarMonitor {
                 self.graceful_shutdown().await?;
             }
         }
-        
+
         Ok(())
     }
 
     async fn load_or_create_config() -> Result<SystemConfig> {
         let config_path = "./config/system.toml";
-        
+
         if !std::path::Path::new(config_path).exists() {
             // Create config directory and default config
             tokio::fs::create_dir_all("./config").await?;
-            
+
             // Extract default config from embedded assets
             let default_config = DefaultConfigs::get("system.toml")
                 .ok_or(DeploymentError::MissingEmbeddedAsset)?;
-            
+
             tokio::fs::write(config_path, default_config.data.as_ref()).await?;
             tracing::info!("Created default configuration at {}", config_path);
         }
-        
+
         let config_str = tokio::fs::read_to_string(config_path).await?;
         let config: SystemConfig = toml::from_str(&config_str)?;
-        
+
         Ok(config)
     }
 
@@ -106,11 +108,11 @@ impl SolarMonitor {
         for migration_file in DatabaseMigrations::iter() {
             let migration = DatabaseMigrations::get(&migration_file)
                 .ok_or(DeploymentError::MissingMigration(migration_file.to_string()))?;
-            
+
             let sql = std::str::from_utf8(migration.data.as_ref())?;
             database.execute_migration(&migration_file, sql).await?;
         }
-        
+
         tracing::info!("Database migrations completed");
         Ok(())
     }
@@ -118,6 +120,7 @@ impl SolarMonitor {
 ```
 
 ### 2. Build System Configuration
+
 ```toml
 # Cargo.toml - Single binary configuration
 [package]
@@ -132,7 +135,7 @@ path = "src/main.rs"
 [dependencies]
 # Core functionality
 tokio = { version = "1.0", features = ["full"] }
-axum = { version = "0.7", features = ["ws", "macros"] }
+axum = { version = "0.8", features = ["ws", "macros"] }
 tower = "0.4"
 tower-http = { version = "0.4", features = ["fs", "cors", "compression"] }
 
@@ -167,6 +170,7 @@ opt-level = "z"         # Optimize for size
 ```
 
 ### 3. Build Script for Asset Integration
+
 ```rust
 // build.rs - Prepare assets and generate types
 use std::env;
@@ -174,22 +178,22 @@ use std::path::PathBuf;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let out_dir = PathBuf::from(env::var("OUT_DIR")?);
-    
+
     // Generate TypeScript types from Rust
     generate_typescript_types()?;
-    
+
     // Build frontend if in release mode
     if env::var("PROFILE")? == "release" {
         build_frontend()?;
     }
-    
+
     // Generate embedded migration files
     generate_migration_metadata()?;
-    
+
     println!("cargo:rerun-if-changed=frontend/");
     println!("cargo:rerun-if-changed=src/");
     println!("cargo:rerun-if-changed=database/migrations/");
-    
+
     Ok(())
 }
 
@@ -201,18 +205,18 @@ fn generate_typescript_types() -> Result<(), Box<dyn std::error::Error>> {
 
 fn build_frontend() -> Result<(), Box<dyn std::error::Error>> {
     use std::process::Command;
-    
+
     // Build frontend with Vite
     let output = Command::new("npm")
         .args(&["run", "build"])
         .current_dir("frontend")
         .output()?;
-    
+
     if !output.status.success() {
-        return Err(format!("Frontend build failed: {}", 
+        return Err(format!("Frontend build failed: {}",
                           String::from_utf8_lossy(&output.stderr)).into());
     }
-    
+
     println!("Frontend build completed");
     Ok(())
 }
@@ -221,6 +225,7 @@ fn build_frontend() -> Result<(), Box<dyn std::error::Error>> {
 ## Deployment Methods
 
 ### 1. Direct Binary Deployment
+
 ```bash
 #!/bin/bash
 # deploy.sh - Simple deployment script
@@ -265,7 +270,7 @@ check_root() {
 create_directories() {
     log_info "Creating directories..."
     mkdir -p "$INSTALL_DIR" "$CONFIG_DIR" "$DATA_DIR" "$LOG_DIR"
-    
+
     # Set proper permissions
     chown -R solar-monitor:solar-monitor "$DATA_DIR" "$LOG_DIR" 2>/dev/null || true
     chmod 755 "$INSTALL_DIR" "$CONFIG_DIR"
@@ -283,12 +288,12 @@ create_user() {
 # Install binary
 install_binary() {
     log_info "Installing binary..."
-    
+
     if [ ! -f "./$BINARY_NAME" ]; then
         log_error "Binary '$BINARY_NAME' not found in current directory"
         exit 1
     fi
-    
+
     cp "./$BINARY_NAME" "$INSTALL_DIR/"
     chmod 755 "$INSTALL_DIR/$BINARY_NAME"
     chown root:root "$INSTALL_DIR/$BINARY_NAME"
@@ -297,7 +302,7 @@ install_binary() {
 # Create systemd service
 create_service() {
     log_info "Creating systemd service..."
-    
+
     cat > "/etc/systemd/system/$SERVICE_NAME.service" << EOF
 [Unit]
 Description=Solar Monitor - Universal Solar Inverter Monitoring
@@ -340,13 +345,13 @@ EOF
 # Main installation function
 install() {
     log_info "Starting Solar Monitor installation..."
-    
+
     check_root
     create_user
     create_directories
     install_binary
     create_service
-    
+
     log_info "Installation completed!"
     log_info "To start the service: systemctl start $SERVICE_NAME"
     log_info "To enable auto-start: systemctl enable $SERVICE_NAME"
@@ -358,18 +363,18 @@ install() {
 # Uninstall function
 uninstall() {
     log_info "Uninstalling Solar Monitor..."
-    
+
     check_root
-    
+
     # Stop and disable service
     systemctl stop "$SERVICE_NAME" 2>/dev/null || true
     systemctl disable "$SERVICE_NAME" 2>/dev/null || true
     rm -f "/etc/systemd/system/$SERVICE_NAME.service"
     systemctl daemon-reload
-    
+
     # Remove files
     rm -rf "$INSTALL_DIR"
-    
+
     log_warn "Configuration and data preserved in $CONFIG_DIR and $DATA_DIR"
     log_warn "To remove completely: rm -rf $CONFIG_DIR $DATA_DIR $LOG_DIR"
     log_info "Uninstallation completed!"
@@ -378,21 +383,21 @@ uninstall() {
 # Update function
 update() {
     log_info "Updating Solar Monitor..."
-    
+
     check_root
-    
+
     # Stop service
     systemctl stop "$SERVICE_NAME"
-    
+
     # Backup current binary
     cp "$INSTALL_DIR/$BINARY_NAME" "$INSTALL_DIR/${BINARY_NAME}.backup"
-    
+
     # Install new binary
     install_binary
-    
+
     # Start service
     systemctl start "$SERVICE_NAME"
-    
+
     log_info "Update completed!"
 }
 
@@ -415,6 +420,7 @@ esac
 ```
 
 ### 2. Container Deployment (Optional)
+
 ```dockerfile
 # Dockerfile - Multi-stage build for minimal container
 FROM rust:1.75-slim as builder
@@ -465,6 +471,7 @@ CMD ["solar-monitor"]
 ```
 
 ### 3. Embedded Device Deployment
+
 ```bash
 #!/bin/bash
 # raspberry-pi-deploy.sh - Optimized for Raspberry Pi
@@ -483,7 +490,7 @@ log_info() {
 optimize_for_rpi() {
     log_info "Detected Raspberry Pi (Revision: $RPI_MODEL)"
     log_info "Available memory: ${MEMORY_MB}MB"
-    
+
     # Set resource limits based on available memory
     if [ "$MEMORY_MB" -lt 2048 ]; then
         MEMORY_LIMIT="512M"
@@ -494,12 +501,12 @@ optimize_for_rpi() {
         CPU_QUOTA="80%"
         log_info "Standard mode: Memory limit $MEMORY_LIMIT, CPU quota $CPU_QUOTA"
     fi
-    
+
     # Enable SD card optimizations
     echo "# Solar Monitor SD card optimizations" >> /etc/fstab
     echo "tmpfs /tmp tmpfs defaults,noatime,nosuid,size=100m 0 0" >> /etc/fstab
     echo "tmpfs /var/log tmpfs defaults,noatime,nosuid,mode=0755,size=100m 0 0" >> /etc/fstab
-    
+
     # Configure log rotation for limited storage
     cat > "/etc/logrotate.d/solar-monitor" << EOF
 /var/log/solar-monitor/*.log {
@@ -521,7 +528,7 @@ enable_hardware_acceleration() {
         log_info "Hardware crypto acceleration available"
         echo "CRYPTO_ACCELERATION=true" >> /etc/solar-monitor/environment
     fi
-    
+
     # Enable GPU memory split for better performance
     if [ -f /boot/config.txt ]; then
         if ! grep -q "gpu_mem" /boot/config.txt; then
@@ -535,10 +542,10 @@ enable_hardware_acceleration() {
 configure_power_management() {
     # Disable unnecessary services
     systemctl disable bluetooth hciuart 2>/dev/null || true
-    
+
     # Configure CPU governor for power efficiency
     echo 'GOVERNOR="ondemand"' > /etc/default/cpufrequtils
-    
+
     # Disable HDMI if no display needed (saves ~25mA)
     if [ ! -f /etc/solar-monitor/keep-hdmi ]; then
         echo "/opt/vc/bin/tvservice -o" >> /etc/rc.local
@@ -549,14 +556,14 @@ configure_power_management() {
 # Main deployment for Raspberry Pi
 deploy_rpi() {
     log_info "Starting Raspberry Pi optimized deployment..."
-    
+
     optimize_for_rpi
     enable_hardware_acceleration
     configure_power_management
-    
+
     # Run standard installation
     install
-    
+
     # Update systemd service with Pi-specific settings
     cat >> "/etc/systemd/system/solar-monitor.service" << EOF
 
@@ -572,10 +579,10 @@ Environment=DEVICE_TYPE=raspberry_pi
 EOF
 
     systemctl daemon-reload
-    
+
     log_info "Raspberry Pi deployment completed!"
     log_info "Optimizations applied for $MEMORY_MB MB memory"
-    
+
     # Offer to enable service
     read -p "Enable solar-monitor service to start on boot? [y/N] " -n 1 -r
     echo
@@ -592,6 +599,7 @@ deploy_rpi
 ## Operations and Maintenance
 
 ### 1. Health Monitoring and Alerts
+
 ```rust
 pub struct HealthMonitor {
     checks: Vec<Box<dyn HealthCheck>>,
@@ -627,33 +635,34 @@ pub struct SystemResourceCheck;
 impl HealthCheck for SystemResourceCheck {
     async fn check(&self) -> HealthCheckResult {
         let system_info = collect_system_info().await?;
-        
+
         let mut issues = Vec::new();
-        
+
         if system_info.memory_usage_percent > 85.0 {
             issues.push(HealthIssue::HighMemoryUsage(system_info.memory_usage_percent));
         }
-        
+
         if system_info.disk_usage_percent > 90.0 {
             issues.push(HealthIssue::HighDiskUsage(system_info.disk_usage_percent));
         }
-        
+
         if system_info.cpu_temperature_celsius > 75.0 {
             issues.push(HealthIssue::HighTemperature(system_info.cpu_temperature_celsius));
         }
-        
+
         if issues.is_empty() {
             HealthCheckResult::Healthy
         } else {
             HealthCheckResult::Unhealthy { issues }
         }
     }
-    
+
     fn name(&self) -> &str { "system_resources" }
 }
 ```
 
 ### 2. Configuration Management
+
 ```toml
 # config/system.toml - Production configuration
 [system]
@@ -714,6 +723,7 @@ daily_aggregates_days = 365
 ```
 
 ### 3. Backup and Recovery
+
 ```bash
 #!/bin/bash
 # backup.sh - Backup and recovery for solar monitor
@@ -726,58 +736,58 @@ BACKUP_RETENTION_DAYS=30
 create_backup() {
     local backup_name="solar-monitor-backup-$(date +%Y%m%d-%H%M%S)"
     local backup_path="$BACKUP_DIR/$backup_name"
-    
+
     mkdir -p "$backup_path"
-    
+
     # Stop service for consistent backup
     systemctl stop solar-monitor
-    
+
     # Backup database
     cp "$DATA_DIR/solar-monitor.db" "$backup_path/"
-    
+
     # Backup configuration
     cp -r "$CONFIG_DIR" "$backup_path/"
-    
+
     # Compress backup
     tar -czf "$backup_path.tar.gz" -C "$BACKUP_DIR" "$backup_name"
     rm -rf "$backup_path"
-    
+
     # Restart service
     systemctl start solar-monitor
-    
+
     echo "Backup created: $backup_path.tar.gz"
-    
+
     # Cleanup old backups
     find "$BACKUP_DIR" -name "*.tar.gz" -mtime +$BACKUP_RETENTION_DAYS -delete
 }
 
 restore_backup() {
     local backup_file="$1"
-    
+
     if [ ! -f "$backup_file" ]; then
         echo "Backup file not found: $backup_file"
         exit 1
     fi
-    
+
     # Stop service
     systemctl stop solar-monitor
-    
+
     # Extract backup
     tar -xzf "$backup_file" -C "/tmp/"
     local extracted_dir="/tmp/$(basename "$backup_file" .tar.gz)"
-    
+
     # Restore database
     cp "$extracted_dir/solar-monitor.db" "$DATA_DIR/"
-    
+
     # Restore configuration
     cp -r "$extracted_dir/solar-monitor"/* "$CONFIG_DIR/"
-    
+
     # Fix permissions
     chown -R solar-monitor:solar-monitor "$DATA_DIR"
-    
+
     # Start service
     systemctl start solar-monitor
-    
+
     echo "Backup restored from: $backup_file"
 }
 
@@ -787,7 +797,7 @@ install_cron_backup() {
 # Solar Monitor automated backup
 0 2 * * * root /opt/solar-monitor/backup.sh create_backup >/dev/null 2>&1
 EOF
-    
+
     echo "Automated backup installed (daily at 2 AM)"
 }
 
@@ -809,6 +819,7 @@ esac
 ```
 
 ### 4. Update and Maintenance
+
 ```bash
 #!/bin/bash
 # update.sh - In-place binary updates
@@ -820,10 +831,10 @@ UPDATE_URL="https://github.com/your-org/solar-monitor/releases/latest/download"
 check_for_updates() {
     local current_version=$(solar-monitor --version 2>/dev/null | cut -d' ' -f2 || echo "unknown")
     local latest_version=$(curl -s https://api.github.com/repos/your-org/solar-monitor/releases/latest | jq -r .tag_name)
-    
+
     echo "Current version: $current_version"
     echo "Latest version: $latest_version"
-    
+
     if [ "$current_version" != "$latest_version" ]; then
         echo "Update available!"
         return 0
@@ -837,44 +848,44 @@ download_update() {
     local arch=$(uname -m)
     local download_url="$UPDATE_URL/solar-monitor-$arch"
     local temp_binary="/tmp/solar-monitor-new"
-    
+
     echo "Downloading update..."
     curl -L "$download_url" -o "$temp_binary"
     chmod +x "$temp_binary"
-    
+
     # Verify binary
     if ! "$temp_binary" --version >/dev/null 2>&1; then
         echo "Downloaded binary is invalid"
         rm -f "$temp_binary"
         return 1
     fi
-    
+
     echo "Update downloaded successfully"
     echo "$temp_binary"
 }
 
 apply_update() {
     local new_binary="$1"
-    
+
     if [ ! -f "$new_binary" ]; then
         echo "Update binary not found: $new_binary"
         return 1
     fi
-    
+
     echo "Applying update..."
-    
+
     # Create backup
     cp "$INSTALL_DIR/$BINARY_NAME" "$INSTALL_DIR/${BINARY_NAME}.backup"
-    
+
     # Stop service
     systemctl stop solar-monitor
-    
+
     # Replace binary
     cp "$new_binary" "$INSTALL_DIR/$BINARY_NAME"
-    
+
     # Start service
     systemctl start solar-monitor
-    
+
     # Verify service is running
     sleep 5
     if systemctl is-active --quiet solar-monitor; then
@@ -921,6 +932,7 @@ esac
 ## Single Binary Advantages
 
 ### Deployment Benefits
+
 - **Zero Dependencies**: No need for runtime dependencies or package managers
 - **Simple Installation**: Single file copy and configuration
 - **Atomic Updates**: Replace entire binary in one operation
@@ -928,6 +940,7 @@ esac
 - **Minimal Attack Surface**: Fewer components to secure and maintain
 
 ### Edge Device Optimization
+
 - **Resource Efficiency**: All components optimized together
 - **Startup Speed**: No dynamic loading overhead
 - **Storage Efficiency**: Single file vs multiple packages

@@ -1,17 +1,20 @@
 # Universal Solar Monitor - Edge Device Specification
 
 ## Overview
+
 A device-agnostic, single-binary solar monitoring solution for inverters, batteries, charge controllers, and energy meters. Starting with EG4 6000XP inverter support, designed for extensible local deployment on Raspberry Pi or Nucbox devices. Built with Rust backend and Preact/TypeScript frontend, extending the existing WebSocket bridge foundation.
 
 ## Core Principles
 
 ### Edge-First Design
+
 - **Single Binary**: Complete solution in one executable (~10-20MB)
 - **Local Only**: No cloud dependencies, local network access only
 - **Resource Conscious**: <100MB RAM, minimal CPU usage
 - **Simple Deployment**: Copy binary, edit config file, run
 
 ### Realistic Scope
+
 - **Target**: 1-10 solar devices (inverters, batteries, charge controllers) on local network
 - **Phase 1**: EG4 6000XP inverters via PI30 protocol
 - **Phase 2**: Battery systems via Modbus TCP, charge controllers via CAN bus
@@ -22,6 +25,7 @@ A device-agnostic, single-binary solar monitoring solution for inverters, batter
 ## Architecture (Simplified)
 
 ### Single Process Design
+
 ```
 ┌─────────────────────────────────────────────────┐
 │           Universal Solar Monitor               │
@@ -45,6 +49,7 @@ A device-agnostic, single-binary solar monitoring solution for inverters, batter
 ```
 
 ### Technology Stack
+
 - Backend: Rust with Tokio, Axum, SQLx, tokio-serial (RS485 first)
 - Database: SQLite (embedded, single file)
 - Frontend: Preact + TypeScript + Tailwind CSS (embedded in binary)
@@ -54,12 +59,13 @@ A device-agnostic, single-binary solar monitoring solution for inverters, batter
 ## Core Components
 
 ### 1. Device-Agnostic Protocol System (RS485-first)
+
 ```rust
 // Universal protocol interface (starting with EG4, extensible to others)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DeviceType {
     SolarInverter,
-    BatterySystem, 
+    BatterySystem,
     ChargeController,
     EnergyMeter,
 }
@@ -86,6 +92,7 @@ pub trait DeviceProtocol: Send + Sync {
 ```
 
 ### 2. Universal Data Model (Canonical)
+
 ```rust
 // Device-agnostic data structure that works for all device types
 #[derive(Serialize, Deserialize, Debug, Clone)] // #[derive(specta::Type)] in code
@@ -107,29 +114,29 @@ pub struct DeviceMetrics {
     pub input_power_watts: Option<f64>,
     pub output_power_watts: Option<f64>,
     pub load_percentage: Option<f64>,
-    
+
     // Battery metrics (inverters, battery systems)
     pub battery_voltage: Option<f64>,
-    pub battery_current: Option<f64>, 
+    pub battery_current: Option<f64>,
     pub battery_soc_percentage: Option<f64>,
     pub battery_temperature_celsius: Option<f64>,
-    
+
     // Solar metrics (inverters, charge controllers)
     pub pv_voltage: Option<f64>,
     pub pv_current: Option<f64>,
     pub pv_power_watts: Option<f64>,
-    
+
     // Grid metrics (inverters, energy meters)
     pub grid_voltage: Option<f64>,
     pub grid_frequency: Option<f64>,
     pub grid_power_watts: Option<f64>,
-    
+
     // Device-specific
     pub device_temperature_celsius: Option<f64>,
     pub efficiency_percentage: Option<f64>,
     pub fault_codes: Vec<String>,
     pub operating_mode: Option<String>,
-    
+
     // Extension point for protocol-specific metrics
     pub custom_metrics: HashMap<String, f64>,
 }
@@ -157,6 +164,7 @@ pub enum HealthStatus {
 ## Features
 
 ### Core Features (v1.0) - RS485 Foundation
+
 - [x] Universal protocol system with EG4/PI30 over RS485 as first implementation
 - [ ] Device-agnostic SQLite data persistence with JSON blob storage
 - [ ] Universal web dashboard supporting all device types
@@ -166,6 +174,7 @@ pub enum HealthStatus {
 - [ ] Protocol registry with compile-time registration
 
 ### Future Extensions (v1.1+)
+
 - [ ] Modbus TCP protocol for battery systems
 - [ ] CAN bus protocol for advanced battery management
 - [ ] RS485 for charge controllers
@@ -176,6 +185,7 @@ pub enum HealthStatus {
 - [ ] Advanced device discovery across protocols
 
 ### Explicitly Out of Scope
+
 - Dynamic plugin loading (compile-time only)
 - Cloud connectivity or external dependencies
 - Advanced analytics or ML features
@@ -187,18 +197,21 @@ pub enum HealthStatus {
 ## Development Plan
 
 ### Phase 1: Universal Foundation (Week 1-2)
+
 1. Implement device-agnostic protocol system with EG4 as first protocol
 2. Create universal SQLite schema with JSON blob storage
 3. Build device-agnostic REST API endpoints
 4. Embed universal frontend supporting multiple device types
 
 ### Phase 2: EG4 Implementation (Week 3-4)
+
 1. Complete EG4/PI30 protocol implementation and testing
 2. Build universal dashboard with device-type-aware UI
 3. Implement multi-device discovery and management
 4. Add device-type-specific charts and metrics visualization
 
 ### Phase 3: Protocol Extension Ready (Week 5-6)
+
 1. Validate protocol abstraction with mock Modbus implementation
 2. Create protocol registration system documentation
 3. Implement configuration management for mixed device environments
@@ -207,6 +220,7 @@ pub enum HealthStatus {
 ## Resource Requirements (Device-Agnostic Scaling)
 
 ### Minimum Hardware (Edge Device Optimized)
+
 - **CPU**: 1 core @ 1GHz (Raspberry Pi 3+ level)
 - **RAM**: 512MB (will use <100MB for 10 devices)
 - **Storage**: 4GB available (universal database will use <1GB/year)
@@ -214,6 +228,7 @@ pub enum HealthStatus {
 - **Network**: 100Mbps local network
 
 ### Target Performance
+
 - **Startup time**: <5 seconds
 - **Memory usage**: 50-100MB steady state
 - **Response time**: <100ms for dashboard loads
@@ -223,6 +238,7 @@ pub enum HealthStatus {
 ## Single Binary Implementation
 
 ### Build Configuration (single binary)
+
 ```toml
 [package]
 name = "solar-monitor"
@@ -235,7 +251,7 @@ path = "src/main.rs"
 
 [dependencies]
 tokio = { version = "1.0", features = ["full"] }
-axum = { version = "0.7", features = ["macros"] }
+axum = { version = "0.8", features = ["macros"] }
 sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite"] }
 serde = { version = "1.0", features = ["derive"] }
 specta = "1.0"
@@ -251,6 +267,7 @@ opt-level = "z" # Optimize for size
 ```
 
 ### Embedded Assets
+
 - Frontend built into binary using `rust-embed`
 - Tailwind CSS built via Vite/PostCSS and included in the embedded assets
 - Default configuration embedded
@@ -258,6 +275,7 @@ opt-level = "z" # Optimize for size
 - No external files required at runtime
 
 ### Deployment
+
 ```bash
 # Single command deployment
 curl -L https://releases.../solar-monitor-arm64 -o solar-monitor
@@ -275,6 +293,7 @@ sudo systemctl start solar-monitor
 - Export/Import: Provide endpoints to export/import device config as JSON for backup/restore.
 
 ### Simple Bootstrap Configuration (RS485)
+
 ```toml
 # /etc/solar-monitor/config.toml
 [server]
@@ -320,16 +339,19 @@ stop_bits = "1"
 ```
 
 ### RS485 Connection Parameters
+
 - Required: `serial_port` (e.g., `/dev/ttyUSB0`), `baud_rate` (default `2400`)
 - Optional defaults: `data_bits=8`, `parity=none`, `stop_bits=1`, `timeout_seconds=3`
 - Validation: use `QID`/`QPIGS` test before persisting device.
 
 ### Auto-Discovery (RS485)
+
 - Scan available serial ports for EG4 inverters
 - Verify PI30 protocol compatibility via QID
 - Suggest configuration via web interface
 
 ### Web UI Device Management (v1)
+
 - Add device: provide name, protocol, device_type, RS485 params; system validates connectivity before saving.
 - Update/remove device at runtime; polling restarts automatically.
 - Test connection: one-off PI30 QID/QPIGS to verify serial parameters.
@@ -347,24 +369,28 @@ stop_bits = "1"
 ## Success Criteria
 
 ### User Experience
+
 - Install on Raspberry Pi in <5 minutes
 - Access dashboard immediately after setup
 - See real-time solar data without configuration
 - View daily/weekly trends
 
 ### Technical Goals
+
 - <20MB binary size
 - <100MB RAM usage
 - <5 second startup time
 - 99% uptime on stable connections
 
 ### Business Value
+
 - Replace proprietary monitoring solutions
 - Enable local data ownership
 - Support multiple EG4 inverters
 - Foundation for future solar equipment support
 
 This specification focuses on delivering real value with minimal complexity, building on the solid foundation of the existing WebSocket bridge rather than over-engineering an enterprise solution.
+
 ## Common Types (Source of Truth)
 
 These types are canonical for all components. API DTOs and DB schemas must map directly to these.
@@ -423,6 +449,7 @@ pub struct DeviceData {
 ```
 
 JSON conventions
+
 - Field names: camelCase
 - Enum values: camelCase strings (serde rename rules)
 - Timestamps: ISO 8601 (UTC)

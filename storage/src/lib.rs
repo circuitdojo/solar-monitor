@@ -20,9 +20,22 @@ impl DataStore {
             }
         }
 
-        let url = format!("sqlite:{}", database_path);
+        // Build connection URL.
+        // Special-case in-memory to ensure correct behavior with pools.
+        let (url, max_conns) = if database_path == ":memory:" {
+            // Shared-cache memory so all pooled connections see same DB.
+            ("sqlite::memory:?cache=shared".to_string(), 1u32)
+        } else {
+            // Best-effort: pre-create the SQLite file to avoid implicit creation issues.
+            let _ = std::fs::OpenOptions::new()
+                .create(true)
+                .write(false)
+                .open(database_path);
+            (format!("sqlite://{}?mode=rwc", database_path), 5u32)
+        };
+
         let pool = SqlitePoolOptions::new()
-            .max_connections(5)
+            .max_connections(max_conns)
             .connect(&url)
             .await?;
 

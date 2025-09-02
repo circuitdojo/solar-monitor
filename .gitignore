@@ -1,2 +1,7 @@
+bridge
+data
+dist
+node_modules
 target
+test-output
 .venv

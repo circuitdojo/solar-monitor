@@ -68,6 +68,7 @@ eg4-monitor/
 #### 1.1 Workspace Setup and Dependencies
 
 **File: `Cargo.toml` (root)**
+
 ```toml
 [workspace]
 members = ["contracts", "core", "protocols", "storage", "api", "bin"]
@@ -87,6 +88,7 @@ features = ["runtime-tokio-rustls", "sqlite", "chrono", "uuid", "json"]
 ```
 
 **File: `core/Cargo.toml`**
+
 ```toml
 [package]
 name = "solar-monitor-core"
@@ -109,14 +111,17 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 Add a `contracts/` crate containing canonical Rust types (DeviceType, HealthStatus, DeviceStatus, DeviceMetrics, DeviceData, DeviceConfigDto) deriving `specta::Type`. Provide a small export tool to emit matching TypeScript types to `types/ts/` at repository root.
 
 Command to generate TS types:
+
 ```
 cargo run -p contracts --bin export_types
 ```
+
 The frontend imports types from `types/ts/`.
 
 #### 1.2 Core Data Models
 
 **File: `core/src/data/mod.rs`**
+
 ```rust
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -139,29 +144,29 @@ pub struct DeviceMetrics {
     pub input_power_watts: Option<f64>,
     pub output_power_watts: Option<f64>,
     pub load_percentage: Option<f64>,
-    
+
     // Battery metrics (inverters, battery systems)
     pub battery_voltage: Option<f64>,
     pub battery_current: Option<f64>,
     pub battery_soc_percentage: Option<f64>,
     pub battery_temperature_celsius: Option<f64>,
-    
+
     // Solar metrics (inverters, charge controllers)
     pub pv_voltage: Option<f64>,
     pub pv_current: Option<f64>,
     pub pv_power_watts: Option<f64>,
-    
+
     // Grid metrics (inverters, energy meters)
     pub grid_voltage: Option<f64>,
     pub grid_frequency: Option<f64>,
     pub grid_power_watts: Option<f64>,
-    
+
     // Device health
     pub device_temperature_celsius: Option<f64>,
     pub efficiency_percentage: Option<f64>,
     pub fault_codes: Vec<String>,
     pub operating_mode: Option<String>,
-    
+
     // Protocol-specific extensions
     pub custom_metrics: HashMap<String, f64>,
 }
@@ -244,6 +249,7 @@ pub struct CommandResponse {
 #### 1.3 Protocol System Interface
 
 **File: `core/src/protocol/mod.rs`**
+
 ```rust
 use crate::data::*;
 use async_trait::async_trait;
@@ -271,7 +277,7 @@ pub trait DeviceProtocol: Send + Sync {
     fn protocol_name(&self) -> &'static str;
     fn metadata(&self) -> ProtocolMetadata;
     fn supported_device_types(&self) -> Vec<DeviceType>;
-    
+
     async fn discover_devices(&self, scan_config: &ScanConfig) -> Result<Vec<DiscoveredDevice>>;
     async fn connect(&self, config: &DeviceConfig) -> Result<Box<dyn DeviceConnection>>;
 }
@@ -289,6 +295,7 @@ pub trait DeviceConnection: Send + Sync {
 #### 1.4 Protocol Registry
 
 **File: `core/src/protocol/registry.rs`**
+
 ```rust
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -311,28 +318,28 @@ impl ProtocolRegistry {
             discovered_cache: Arc::new(RwLock::new(HashMap::new())),
         }
     }
-    
+
     pub fn register_protocol(&mut self, protocol: Arc<dyn DeviceProtocol>) {
         let name = protocol.protocol_name();
         let metadata = protocol.metadata();
-        
+
         self.protocols.insert(name, protocol);
         self.metadata.insert(name, metadata);
-        
+
         tracing::info!("Registered protocol: {}", name);
     }
-    
+
     pub fn get_protocol(&self, name: &str) -> Option<&dyn DeviceProtocol> {
         self.protocols.get(name).map(|p| p.as_ref())
     }
-    
+
     pub fn list_protocols(&self) -> Vec<&ProtocolMetadata> {
         self.metadata.values().collect()
     }
-    
+
     pub async fn discover_all_devices(&self, scan_config: &ScanConfig) -> Result<Vec<DiscoveredDevice>> {
         let mut all_devices = Vec::new();
-        
+
         for protocol in self.protocols.values() {
             match protocol.discover_devices(scan_config).await {
                 Ok(mut devices) => {
@@ -344,13 +351,13 @@ impl ProtocolRegistry {
                 }
             }
         }
-        
+
         // Cache discovered devices
         let mut cache = self.discovered_cache.write().await;
         for device in &all_devices {
             cache.insert(device.id.clone(), device.clone());
         }
-        
+
         Ok(all_devices)
     }
 }
@@ -359,6 +366,7 @@ impl ProtocolRegistry {
 #### 1.5 Core Library Setup
 
 **File: `core/src/lib.rs`**
+
 ```rust
 pub mod data;
 pub mod protocol;
@@ -375,6 +383,7 @@ pub use protocol::{DeviceProtocol, DeviceConnection, ProtocolRegistry};
 #### 2.1 EG4 Protocol Structure
 
 **File: `protocols/Cargo.toml`**
+
 ```toml
 [package]
 name = "solar-monitor-protocols"
@@ -392,6 +401,7 @@ tokio-serial = "5.4"
 ```
 
 **File: `protocols/src/eg4_rs485/mod.rs`**
+
 ```rust
 mod protocol;
 mod connection;
@@ -404,6 +414,7 @@ pub use connection::EG4SerialConnection;
 #### 2.2 EG4 Protocol Implementation
 
 **File: `protocols/src/eg4_rs485/protocol.rs`**
+
 ```rust
 use std::collections::HashMap;
 use std::time::Duration;
@@ -413,7 +424,7 @@ use async_trait::async_trait;
 use anyhow::Result;
 
 use solar_monitor_core::{
-    DeviceProtocol, DeviceConnection, DeviceConfig, DeviceType, 
+    DeviceProtocol, DeviceConnection, DeviceConfig, DeviceType,
     DiscoveredDevice, ScanConfig, ProtocolMetadata, ProtocolCapabilities
 };
 
@@ -436,7 +447,7 @@ impl DeviceProtocol for EG4Protocol {
     fn protocol_name(&self) -> &'static str {
         "eg4-pi30-rs485"
     }
-    
+
     fn metadata(&self) -> ProtocolMetadata {
         ProtocolMetadata {
             name: "EG4/PI30 RS485",
@@ -451,23 +462,23 @@ impl DeviceProtocol for EG4Protocol {
             },
         }
     }
-    
+
     fn supported_device_types(&self) -> Vec<DeviceType> {
         vec![DeviceType::SolarInverter]
     }
-    
+
     async fn discover_devices(&self, scan_config: &ScanConfig) -> Result<Vec<DiscoveredDevice>> {
         let mut devices = Vec::new();
-        
+
         for serial_port in &scan_config.serial_ports {
             if let Ok(device) = self.test_eg4_device(serial_port, scan_config.timeout_seconds).await {
                 devices.push(device);
             }
         }
-        
+
         Ok(devices)
     }
-    
+
     async fn connect(&self, config: &DeviceConfig) -> Result<Box<dyn DeviceConnection>> {
         let serial_port = config.connection_params.get("serial_port")
             .ok_or_else(|| anyhow::anyhow!("Missing serial_port parameter"))?;
@@ -475,13 +486,13 @@ impl DeviceProtocol for EG4Protocol {
             .unwrap_or(&"2400".to_string())
             .parse()
             .unwrap_or(2400);
-        
+
         let connection = EG4SerialConnection::new(
             config.clone(),
             serial_port.clone(),
             baud_rate
         ).await?;
-        
+
         Ok(Box::new(connection))
     }
 }
@@ -495,27 +506,27 @@ impl EG4Protocol {
             .stop_bits(tokio_serial::StopBits::One)
             .timeout(Duration::from_secs(timeout_seconds as u64))
             .open_native_async()?;
-            
+
         let mut serial = SerialStream::new(serial)?;
-        
+
         // Send QID command to identify device
         let qid_command = self.parser.build_command("QID");
         serial.write_all(qid_command.as_bytes()).await?;
-        
+
         // Read response
         let mut buffer = vec![0; 1024];
         let bytes_read = tokio::time::timeout(
             Duration::from_secs(3),
             serial.read(&mut buffer)
         ).await??;
-        
+
         buffer.truncate(bytes_read);
         let response = String::from_utf8_lossy(&buffer);
-        
+
         // Validate PI30 response and check for EG4 6000XP
         if self.parser.is_valid_response(&response) {
             let device_info = self.parser.parse_device_info(&response)?;
-            
+
             Ok(DiscoveredDevice {
                 id: port_path.to_string(),
                 name: format!("EG4 6000XP on {}", port_path),
@@ -539,6 +550,7 @@ impl EG4Protocol {
 #### 2.3 PI30 Parser Implementation
 
 **File: `protocols/src/eg4_rs485/pi30.rs`**
+
 ```rust
 use std::collections::HashMap;
 use anyhow::Result;
@@ -549,43 +561,43 @@ impl PI30Parser {
     pub fn new() -> Self {
         Self
     }
-    
+
     pub fn build_command(&self, command: &str) -> String {
         let crc = self.calculate_crc16(command.as_bytes());
         format!("{}{:04X}\r", command, crc)
     }
-    
+
     pub fn is_valid_response(&self, response: &str) -> bool {
         response.starts_with('(') && response.ends_with('\r')
     }
-    
+
     pub fn parse_device_info(&self, response: &str) -> Result<HashMap<String, String>> {
         // Parse QID response to extract device information
         let mut info = HashMap::new();
-        
+
         if let Some(device_id) = self.extract_device_id(response) {
             info.insert("device_id".to_string(), device_id);
             info.insert("model".to_string(), "EG4-6000XP".to_string());
         }
-        
+
         Ok(info)
     }
-    
+
     pub fn parse_qpigs_response(&self, response: &str) -> Result<HashMap<String, f64>> {
         // Remove PI30 framing (parentheses and CR)
         if !self.is_valid_response(response) {
             return Err(anyhow::anyhow!("Invalid PI30 response format"));
         }
-        
+
         let data = &response[1..response.len()-1];
         let fields: Vec<&str> = data.split(' ').collect();
-        
+
         if fields.len() < 20 {
             return Err(anyhow::anyhow!("Insufficient QPIGS fields: got {}, need 20+", fields.len()));
         }
-        
+
         let mut metrics = HashMap::new();
-        
+
         // Parse each field by position (PI30 QPIGS format)
         self.safe_parse_field(&mut metrics, "grid_voltage", fields.get(0))?;
         self.safe_parse_field(&mut metrics, "grid_frequency", fields.get(1))?;
@@ -603,10 +615,10 @@ impl PI30Parser {
         self.safe_parse_field(&mut metrics, "pv_input_voltage", fields.get(13))?;
         self.safe_parse_field(&mut metrics, "battery_scc_voltage", fields.get(14))?;
         self.safe_parse_field(&mut metrics, "battery_discharge_current", fields.get(15))?;
-        
+
         Ok(metrics)
     }
-    
+
     fn safe_parse_field(&self, map: &mut HashMap<String, f64>, key: &str, value: Option<&str>) -> Result<()> {
         if let Some(val_str) = value {
             if let Ok(val) = val_str.parse::<f64>() {
@@ -615,7 +627,7 @@ impl PI30Parser {
         }
         Ok(())
     }
-    
+
     fn extract_device_id(&self, response: &str) -> Option<String> {
         // Extract device ID from QID response
         if response.len() > 10 {
@@ -624,7 +636,7 @@ impl PI30Parser {
             None
         }
     }
-    
+
     fn calculate_crc16(&self, data: &[u8]) -> u16 {
         let mut crc: u16 = 0xFFFF;
         for &byte in data {
@@ -645,6 +657,7 @@ impl PI30Parser {
 #### 2.4 EG4 Serial Connection
 
 **File: `protocols/src/eg4_rs485/connection.rs`**
+
 ```rust
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -676,9 +689,9 @@ impl EG4SerialConnection {
             .stop_bits(tokio_serial::StopBits::One)
             .timeout(Duration::from_secs(5))
             .open_native_async()?;
-            
+
         let serial = Some(SerialStream::new(serial_port)?);
-        
+
         let device_info = DeviceInfo {
             id: config.id.clone(),
             name: config.name.clone(),
@@ -686,7 +699,7 @@ impl EG4SerialConnection {
             protocol: "eg4-pi30-rs485".to_string(),
             connection_info: format!("RS485: {} @ {}bps", port_path, baud_rate),
         };
-        
+
         Ok(Self {
             config,
             serial,
@@ -701,18 +714,18 @@ impl DeviceConnection for EG4SerialConnection {
     async fn read_data(&mut self) -> Result<DeviceData> {
         // Send QPIGS command to get general status
         let raw_response = self.send_pi30_command("QPIGS").await?;
-        
+
         // Parse PI30 response to universal DeviceMetrics
         let pi30_fields = self.parser.parse_qpigs_response(&raw_response)?;
         let metrics = self.map_to_universal_metrics(&pi30_fields);
-        
+
         let status = DeviceStatus {
             is_connected: true,
             last_seen: Utc::now(),
             health: HealthStatus::Healthy,
             error_message: None,
         };
-        
+
         Ok(DeviceData {
             device_id: self.config.id.clone(),
             timestamp: Utc::now(),
@@ -722,12 +735,12 @@ impl DeviceConnection for EG4SerialConnection {
             raw_data: Some(raw_response),
         })
     }
-    
+
     async fn send_command(&mut self, command: &str) -> Result<CommandResponse> {
         let start_time = std::time::Instant::now();
         let response = self.send_pi30_command(command).await?;
         let execution_time = start_time.elapsed();
-        
+
         Ok(CommandResponse {
             success: true,
             data: response,
@@ -735,15 +748,15 @@ impl DeviceConnection for EG4SerialConnection {
             execution_time_ms: execution_time.as_millis() as u64,
         })
     }
-    
+
     fn device_info(&self) -> &DeviceInfo {
         &self.device_info
     }
-    
+
     fn is_connected(&self) -> bool {
         self.serial.is_some()
     }
-    
+
     async fn health_check(&mut self) -> Result<()> {
         // Use QID command as health check
         self.send_pi30_command("QID").await?;
@@ -755,62 +768,62 @@ impl EG4SerialConnection {
     async fn send_pi30_command(&mut self, command: &str) -> Result<String> {
         let serial = self.serial.as_mut()
             .ok_or_else(|| anyhow::anyhow!("RS485 port not connected"))?;
-        
+
         // Build complete PI30 command with CRC
         let full_command = self.parser.build_command(command);
-        
+
         // Send over RS485
         serial.write_all(full_command.as_bytes()).await?;
-        
+
         // Read response
         let mut buffer = vec![0; 1024];
         let bytes_read = tokio::time::timeout(
             Duration::from_secs(3), // RS485 should be fast
             serial.read(&mut buffer)
         ).await??;
-        
+
         buffer.truncate(bytes_read);
         Ok(String::from_utf8_lossy(&buffer).to_string())
     }
-    
+
     fn map_to_universal_metrics(&self, pi30_fields: &std::collections::HashMap<String, f64>) -> DeviceMetrics {
         // Calculate derived metrics
         let pv_power = pi30_fields.get("pv_input_voltage")
             .zip(pi30_fields.get("pv_input_current"))
             .map(|(v, i)| v * i);
-            
+
         let battery_current = pi30_fields.get("battery_charging_current")
             .zip(pi30_fields.get("battery_discharge_current"))
             .map(|(charge, discharge)| charge - discharge);
-        
+
         DeviceMetrics {
             // Power metrics
             input_power_watts: pv_power,
             output_power_watts: pi30_fields.get("output_active_power").copied(),
             load_percentage: pi30_fields.get("output_load_percent").copied(),
-            
+
             // Battery metrics
             battery_voltage: pi30_fields.get("battery_voltage").copied(),
             battery_current,
             battery_soc_percentage: pi30_fields.get("battery_capacity").copied(),
             battery_temperature_celsius: None, // Not available in PI30
-            
+
             // Solar metrics
             pv_voltage: pi30_fields.get("pv_input_voltage").copied(),
             pv_current: pi30_fields.get("pv_input_current").copied(),
             pv_power_watts: pv_power,
-            
+
             // Grid metrics
             grid_voltage: pi30_fields.get("grid_voltage").copied(),
             grid_frequency: pi30_fields.get("grid_frequency").copied(),
             grid_power_watts: None,
-            
+
             // Device health
             device_temperature_celsius: pi30_fields.get("inverter_temperature").copied(),
             efficiency_percentage: None, // Calculate: output/input * 100
             fault_codes: Vec::new(), // TODO: Parse device status bits
             operating_mode: Some("Normal".to_string()),
-            
+
             // EG4-specific extensions
             custom_metrics: std::collections::HashMap::from([
                 ("bus_voltage".to_string(), pi30_fields.get("bus_voltage").copied().unwrap_or(0.0)),
@@ -825,6 +838,7 @@ impl EG4SerialConnection {
 #### 2.5 Protocol Registration
 
 **File: `protocols/src/lib.rs`**
+
 ```rust
 use std::sync::Arc;
 use solar_monitor_core::ProtocolRegistry;
@@ -835,14 +849,14 @@ pub use eg4_rs485::EG4Protocol;
 
 pub fn create_protocol_registry() -> ProtocolRegistry {
     let mut registry = ProtocolRegistry::new();
-    
+
     // Register EG4 RS485 protocol
     registry.register_protocol(Arc::new(EG4Protocol::new()));
-    
+
     // Future protocols:
     // registry.register_protocol(Arc::new(ModbusRTUProtocol::new()));
     // registry.register_protocol(Arc::new(CANProtocol::new()));
-    
+
     registry
 }
 ```
@@ -852,6 +866,7 @@ pub fn create_protocol_registry() -> ProtocolRegistry {
 #### 3.1 Storage Layer Setup
 
 **File: `storage/Cargo.toml`**
+
 ```toml
 [package]
 name = "solar-monitor-storage"
@@ -873,6 +888,7 @@ uuid = { version = "1.0", features = ["v4"] }
 #### 3.2 Database Models and Migrations
 
 **File: `storage/migrations/001_initial.sql`**
+
 ```sql
 -- Universal device-agnostic schema
 CREATE TABLE devices (
@@ -912,16 +928,16 @@ CREATE TABLE daily_summary (
     device_id TEXT NOT NULL,
     date DATE NOT NULL,
     device_type TEXT NOT NULL,
-    
+
     -- Universal aggregated metrics
     avg_input_power REAL,
     avg_output_power REAL,
     max_power REAL,
     total_energy_kwh REAL,
-    
+
     -- Device-type specific aggregations as JSON
     type_specific_metrics TEXT,
-    
+
     sample_count INTEGER,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -933,6 +949,7 @@ CREATE INDEX idx_daily_summary_type_date ON daily_summary(device_type, date);
 #### 3.3 Storage Implementation
 
 **File: `storage/src/lib.rs`**
+
 ```rust
 use std::collections::HashMap;
 use anyhow::Result;
@@ -1089,7 +1106,7 @@ impl DataStore {
         sqlx::query!(
             r#"
             INSERT OR REPLACE INTO devices (
-                id, name, device_type, protocol, connection_params, 
+                id, name, device_type, protocol, connection_params,
                 enabled, poll_interval_seconds, updated_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             "#,
@@ -1122,7 +1139,7 @@ impl DataStore {
                 _ => DeviceType::SolarInverter,
             };
 
-            let connection_params: HashMap<String, String> = 
+            let connection_params: HashMap<String, String> =
                 serde_json::from_str(&r.connection_params)?;
 
             configs.push(DeviceConfig {
@@ -1189,6 +1206,7 @@ impl DataStore {
 #### 4.1 API Server Setup
 
 **File: `api/Cargo.toml`**
+
 ```toml
 [package]
 name = "solar-monitor-api"
@@ -1204,7 +1222,7 @@ serde.workspace = true
 serde_json = "1.0"
 anyhow.workspace = true
 tracing.workspace = true
-axum = "0.7"
+axum = "0.8"
 tower = "0.4"
 tower-http = { version = "0.5", features = ["cors"] }
 specta.workspace = true
@@ -1213,6 +1231,7 @@ specta.workspace = true
 #### 4.2 API Routes and Handlers
 
 **File: `api/src/routes/mod.rs`**
+
 ```rust
 use axum::{Router, extract::State};
 use tower_http::cors::CorsLayer;
@@ -1230,38 +1249,39 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         // System endpoints
         .route("/api/v1/health", axum::routing::get(system::health_check))
         .route("/api/v1/status", axum::routing::get(system::system_status))
-        
+
         // Device management
-        .route("/api/v1/devices", 
+        .route("/api/v1/devices",
                axum::routing::get(devices::list_devices)
                    .post(devices::add_device))
-        .route("/api/v1/devices/:id", 
+        .route("/api/v1/devices/:id",
                axum::routing::get(devices::get_device)
                    .put(devices::update_device)
                    .delete(devices::remove_device))
-        .route("/api/v1/devices/:id/data", 
+        .route("/api/v1/devices/:id/data",
                axum::routing::get(devices::get_device_data))
-        .route("/api/v1/devices/:id/commands", 
+        .route("/api/v1/devices/:id/commands",
                axum::routing::post(devices::send_device_command))
-        
+
         // Data endpoints
-        .route("/api/v1/data/dashboard", 
+        .route("/api/v1/data/dashboard",
                axum::routing::get(data::dashboard_data))
-        .route("/api/v1/data/historical", 
+        .route("/api/v1/data/historical",
                axum::routing::get(data::historical_data))
-        
+
         // Protocol management
-        .route("/api/v1/protocols", 
+        .route("/api/v1/protocols",
                axum::routing::get(protocols::list_protocols))
-        .route("/api/v1/protocols/discovery", 
+        .route("/api/v1/protocols/discovery",
                axum::routing::post(protocols::discover_devices))
-        
+
         .layer(CorsLayer::permissive())
         .with_state(state)
 }
 ```
 
 **File: `api/src/routes/devices.rs`**
+
 ```rust
 use axum::{
     extract::{Path, Query, State},
@@ -1317,7 +1337,7 @@ pub async fn list_devices(
     State(state): State<Arc<AppState>>,
 ) -> ApiResult<ResponseJson<Vec<DeviceDto>>> {
     let configs = state.storage.get_device_configs().await?;
-    
+
     let filtered_devices: Vec<DeviceDto> = configs
         .into_iter()
         .filter(|config| {
@@ -1326,20 +1346,20 @@ pub async fn list_devices(
                     return false;
                 }
             }
-            
+
             if let Some(device_type) = &params.device_type {
                 let device_type_str = format!("{:?}", config.device_type).to_lowercase();
                 if &device_type_str != device_type {
                     return false;
                 }
             }
-            
+
             if let Some(enabled) = params.enabled {
                 if config.enabled != enabled {
                     return false;
                 }
             }
-            
+
             true
         })
         .map(|config| DeviceDto {
@@ -1362,7 +1382,7 @@ pub async fn add_device(
     Json(request): Json<AddDeviceRequest>,
 ) -> ApiResult<ResponseJson<DeviceDto>> {
     let device_id = uuid::Uuid::new_v4().to_string();
-    
+
     let config = DeviceConfig {
         id: device_id.clone(),
         name: request.name,
@@ -1372,14 +1392,14 @@ pub async fn add_device(
         enabled: true,
         poll_interval_seconds: request.poll_interval_seconds.unwrap_or(30),
     };
-    
+
     // Validate protocol exists
     if state.protocol_registry.get_protocol(&config.protocol).is_none() {
         return Err(ApiError::BadRequest("Unknown protocol".to_string()));
     }
-    
+
     state.storage.store_device_config(&config).await?;
-    
+
     let device_dto = DeviceDto {
         id: config.id,
         name: config.name,
@@ -1390,7 +1410,7 @@ pub async fn add_device(
         poll_interval_seconds: config.poll_interval_seconds,
         created_at: chrono::Utc::now().to_rfc3339(),
     };
-    
+
     Ok(ResponseJson(device_dto))
 }
 
@@ -1412,18 +1432,18 @@ pub async fn send_device_command(
     let config = configs.into_iter()
         .find(|c| c.id == device_id)
         .ok_or(ApiError::NotFound("Device not found".to_string()))?;
-    
+
     // Get protocol and create connection
     let protocol = state.protocol_registry.get_protocol(&config.protocol)
         .ok_or(ApiError::BadRequest("Protocol not found".to_string()))?;
-    
+
     let mut connection = protocol.connect(&config).await
         .map_err(|e| ApiError::InternalServerError(format!("Connection failed: {}", e)))?;
-    
+
     // Send command
     let response = connection.send_command(&request.command).await
         .map_err(|e| ApiError::InternalServerError(format!("Command failed: {}", e)))?;
-    
+
     Ok(ResponseJson(response))
 }
 
@@ -1444,6 +1464,7 @@ pub async fn remove_device(Path(_id): Path<String>) -> ApiResult<StatusCode> {
 #### 4.3 API Application State
 
 **File: `api/src/lib.rs`**
+
 ```rust
 use std::sync::Arc;
 use axum::{http::StatusCode, response::IntoResponse, Json};
@@ -1506,12 +1527,12 @@ pub async fn create_server(storage: DataStore, protocol_registry: ProtocolRegist
     });
 
     let app = routes::create_router(state);
-    
+
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await?;
     tracing::info!("API server listening on http://0.0.0.0:8080");
-    
+
     axum::serve(listener, app).await?;
-    
+
     Ok(())
 }
 ```
@@ -1521,6 +1542,7 @@ pub async fn create_server(storage: DataStore, protocol_registry: ProtocolRegist
 #### 5.1 Frontend Setup
 
 **File: `web/package.json`**
+
 ```json
 {
   "name": "solar-monitor-web",
@@ -1554,6 +1576,7 @@ pub async fn create_server(storage: DataStore, protocol_registry: ProtocolRegist
 #### 5.2 TypeScript Types (from Specta)
 
 **File: `web/src/types/index.ts`**
+
 ```typescript
 // Generated by Specta from Rust code
 
@@ -1564,19 +1587,17 @@ export interface DeviceMetrics {
   inputPowerWatts?: number;
   outputPowerWatts?: number;
   loadPercentage?: number;
-  
+
   // Battery metrics
 
 ```
 
 **File: `web/tailwind.config.js`**
+
 ```js
 /** @type {import("tailwindcss").Config} */
 export default {
-  content: [
-    './index.html',
-    './src/**/*.{ts,tsx}',
-  ],
+  content: ["./index.html", "./src/**/*.{ts,tsx}"],
   theme: {
     extend: {},
   },
@@ -1585,6 +1606,7 @@ export default {
 ```
 
 **File: `web/postcss.config.js`**
+
 ```js
 export default {
   plugins: {
@@ -1595,81 +1617,91 @@ export default {
 ```
 
 **File: `web/src/index.css`**
+
 ```css
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 /* App globals */
-html, body, #app { height: 100%; }
-body { @apply bg-slate-50 text-slate-900; }
+html,
+body,
+#app {
+  height: 100%;
+}
+body {
+  @apply bg-slate-50 text-slate-900;
+}
 ```
 
 Import `index.css` in your web entry (e.g., `web/src/main.tsx`):
+
 ```ts
-import './index.css';
+import "./index.css";
 ```
-  batteryVoltage?: number;
-  batteryCurrent?: number;
-  batterySocPercentage?: number;
-  batteryTemperatureCelsius?: number;
-  
-  // Solar metrics
-  pvVoltage?: number;
-  pvCurrent?: number;
-  pvPowerWatts?: number;
-  
-  // Grid metrics
-  gridVoltage?: number;
-  gridFrequency?: number;
-  gridPowerWatts?: number;
-  
-  // Device health
-  deviceTemperatureCelsius?: number;
-  efficiencyPercentage?: number;
-  faultCodes: string[];
-  operatingMode?: string;
-  
-  // Protocol-specific
-  customMetrics: Record<string, number>;
+
+batteryVoltage?: number;
+batteryCurrent?: number;
+batterySocPercentage?: number;
+batteryTemperatureCelsius?: number;
+
+// Solar metrics
+pvVoltage?: number;
+pvCurrent?: number;
+pvPowerWatts?: number;
+
+// Grid metrics
+gridVoltage?: number;
+gridFrequency?: number;
+gridPowerWatts?: number;
+
+// Device health
+deviceTemperatureCelsius?: number;
+efficiencyPercentage?: number;
+faultCodes: string[];
+operatingMode?: string;
+
+// Protocol-specific
+customMetrics: Record<string, number>;
 }
 
 export type HealthStatus = "Healthy" | "Warning" | "Critical" | "Offline";
 
 export interface DeviceStatus {
-  isConnected: boolean;
-  lastSeen: string; // ISO datetime
-  health: HealthStatus;
-  errorMessage?: string;
+isConnected: boolean;
+lastSeen: string; // ISO datetime
+health: HealthStatus;
+errorMessage?: string;
 }
 
 export interface DeviceData {
-  deviceId: string;
-  timestamp: string; // ISO datetime
-  deviceType: DeviceType;
-  metrics: DeviceMetrics;
-  status: DeviceStatus;
-  rawData?: string;
+deviceId: string;
+timestamp: string; // ISO datetime
+deviceType: DeviceType;
+metrics: DeviceMetrics;
+status: DeviceStatus;
+rawData?: string;
 }
 
 export interface DeviceDto {
-  id: string;
-  name: string;
-  deviceType: DeviceType;
-  protocol: string;
-  connectionParams: Record<string, string>;
-  enabled: boolean;
-  pollIntervalSeconds: number;
-  createdAt: string;
+id: string;
+name: string;
+deviceType: DeviceType;
+protocol: string;
+connectionParams: Record<string, string>;
+enabled: boolean;
+pollIntervalSeconds: number;
+createdAt: string;
 }
 
 export interface CommandResponse {
-  success: boolean;
-  data: string;
-  error?: string;
-  executionTimeMs: number;
+success: boolean;
+data: string;
+error?: string;
+executionTimeMs: number;
 }
-```
+
+````
 
 #### 5.3 Universal Device Components
 
@@ -1684,7 +1716,7 @@ interface DeviceCardProps {
 export function DeviceCard({ device }: DeviceCardProps) {
   const healthColor = {
     Healthy: 'text-green-600 bg-green-100',
-    Warning: 'text-yellow-600 bg-yellow-100', 
+    Warning: 'text-yellow-600 bg-yellow-100',
     Critical: 'text-red-600 bg-red-100',
     Offline: 'text-gray-600 bg-gray-100',
   }[device.status.health];
@@ -1707,55 +1739,55 @@ export function DeviceCard({ device }: DeviceCardProps) {
           {device.status.health}
         </span>
       </div>
-      
+
       {/* Universal metrics display */}
       <div className="grid grid-cols-2 gap-4">
-        
+
         {/* Power metrics (all devices) */}
         {device.metrics.inputPowerWatts !== undefined && (
-          <MetricItem 
-            label="Input Power" 
-            value={`${device.metrics.inputPowerWatts.toFixed(0)}W`} 
+          <MetricItem
+            label="Input Power"
+            value={`${device.metrics.inputPowerWatts.toFixed(0)}W`}
           />
         )}
         {device.metrics.outputPowerWatts !== undefined && (
-          <MetricItem 
-            label="Output Power" 
-            value={`${device.metrics.outputPowerWatts.toFixed(0)}W`} 
+          <MetricItem
+            label="Output Power"
+            value={`${device.metrics.outputPowerWatts.toFixed(0)}W`}
           />
         )}
-        
+
         {/* Battery metrics (inverters, battery systems) */}
         {device.metrics.batteryVoltage !== undefined && (
-          <MetricItem 
-            label="Battery Voltage" 
-            value={`${device.metrics.batteryVoltage.toFixed(1)}V`} 
+          <MetricItem
+            label="Battery Voltage"
+            value={`${device.metrics.batteryVoltage.toFixed(1)}V`}
           />
         )}
         {device.metrics.batterySocPercentage !== undefined && (
-          <MetricItem 
-            label="Battery SOC" 
-            value={`${device.metrics.batterySocPercentage.toFixed(0)}%`} 
+          <MetricItem
+            label="Battery SOC"
+            value={`${device.metrics.batterySocPercentage.toFixed(0)}%`}
           />
         )}
-        
+
         {/* Solar metrics (inverters, charge controllers) */}
         {device.metrics.pvPowerWatts !== undefined && (
-          <MetricItem 
-            label="Solar Power" 
-            value={`${device.metrics.pvPowerWatts.toFixed(0)}W`} 
+          <MetricItem
+            label="Solar Power"
+            value={`${device.metrics.pvPowerWatts.toFixed(0)}W`}
           />
         )}
-        
+
         {/* Grid metrics (inverters, energy meters) */}
         {device.metrics.gridVoltage !== undefined && (
-          <MetricItem 
-            label="Grid Voltage" 
-            value={`${device.metrics.gridVoltage.toFixed(1)}V`} 
+          <MetricItem
+            label="Grid Voltage"
+            value={`${device.metrics.gridVoltage.toFixed(1)}V`}
           />
         )}
       </div>
-      
+
       {/* Connection info */}
       <div className="mt-4 pt-4 border-t text-xs text-gray-500">
         <p>Protocol: {device.deviceType}</p>
@@ -1773,11 +1805,12 @@ function MetricItem({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
-```
+````
 
 #### 5.4 Universal Dashboard
 
 **File: `web/src/pages/Dashboard.tsx`**
+
 ```typescript
 import { useEffect, useState } from 'preact/hooks';
 import { DeviceData, DeviceType } from '../types';
@@ -1789,7 +1822,7 @@ export function Dashboard() {
 
   useEffect(() => {
     fetchDashboardData();
-    
+
     // Setup WebSocket for real-time updates
     const ws = new WebSocket('ws://localhost:8080/api/v1/ws');
     ws.onmessage = (event) => {
@@ -1840,7 +1873,7 @@ export function Dashboard() {
   return (
     <div className="p-6 max-w-6xl mx-auto">
       <h1 className="text-3xl font-bold mb-8">Universal Solar Monitor</h1>
-      
+
       {/* System Summary */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
         <SummaryCard
@@ -1864,7 +1897,7 @@ export function Dashboard() {
           icon="❤️"
         />
       </div>
-      
+
       {/* Device sections by type */}
       {Object.entries(devicesByType).map(([type, typeDevices]) => (
         <div key={type} className="mb-8">
@@ -1878,7 +1911,7 @@ export function Dashboard() {
           </div>
         </div>
       ))}
-      
+
       {devices.length === 0 && (
         <div className="text-center py-12 text-gray-500">
           <p>No devices configured.</p>
@@ -1909,12 +1942,12 @@ function getTotalSolarPower(devices: DeviceData[]): number {
 }
 
 function getAverageBatterySOC(devices: DeviceData[]): number {
-  const batteryDevices = devices.filter(d => 
+  const batteryDevices = devices.filter(d =>
     d.metrics.batterySocPercentage !== undefined
   );
   if (batteryDevices.length === 0) return 0;
-  
-  const total = batteryDevices.reduce((sum, device) => 
+
+  const total = batteryDevices.reduce((sum, device) =>
     sum + (device.metrics.batterySocPercentage || 0), 0
   );
   return total / batteryDevices.length;
@@ -1925,7 +1958,7 @@ function getOverallHealth(devices: DeviceData[]): string {
     acc[device.status.health] = (acc[device.status.health] || 0) + 1;
     return acc;
   }, {} as Record<string, number>);
-  
+
   if (healthCounts['Critical'] > 0) return 'Critical';
   if (healthCounts['Warning'] > 0) return 'Warning';
   if (healthCounts['Healthy'] > 0) return 'Healthy';
@@ -1936,6 +1969,7 @@ function getOverallHealth(devices: DeviceData[]): string {
 #### 5.5 Device Management UI (Add/Update/Delete/Test)
 
 State machine
+
 - idle: viewing devices
 - creating: editing form
 - testing: POST /api/v1/devices/test-params
@@ -1945,6 +1979,7 @@ State machine
 - deleting: DELETE /api/v1/devices/:id
 
 Key endpoints
+
 - GET /api/v1/devices
 - GET /api/v1/system/serial-ports
 - POST /api/v1/devices/test-params
@@ -1954,6 +1989,7 @@ Key endpoints
 - GET/POST export/import configs
 
 Example: AddDeviceModal.tsx (outline)
+
 ```typescript
 import { useEffect, useMemo, useState } from 'preact/hooks'
 
@@ -2018,25 +2054,30 @@ export function AddDeviceModal({ onClose, onSaved }: { onClose: () => void; onSa
 ```
 
 Export/Import UI helpers
+
 ```typescript
 export async function exportDevices() {
-  const res = await fetch('/api/v1/devices/export')
-  const data = await res.json()
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = 'devices-export.json'
-  a.click()
-  URL.revokeObjectURL(url)
+  const res = await fetch("/api/v1/devices/export");
+  const data = await res.json();
+  const blob = new Blob([JSON.stringify(data, null, 2)], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "devices-export.json";
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 export async function importDevices(file: File) {
-  const text = await file.text()
-  const res = await fetch('/api/v1/devices/import', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: text
-  })
-  return await res.json() // { added, updated, skipped, errors }
+  const text = await file.text();
+  const res = await fetch("/api/v1/devices/import", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: text,
+  });
+  return await res.json(); // { added, updated, skipped, errors }
 }
 ```
 
@@ -2045,6 +2086,7 @@ export async function importDevices(file: File) {
 #### 6.1 Main Binary
 
 **File: `bin/Cargo.toml`**
+
 ```toml
 [package]
 name = "solar-monitor"
@@ -2069,6 +2111,7 @@ rust-embed = "8.0"
 #### 6.2 Configuration Management
 
 **File: `bin/src/config.rs`**
+
 ```rust
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -2160,7 +2203,7 @@ impl SystemConfig {
         let config: SystemConfig = toml::from_str(&content)?;
         Ok(config)
     }
-    
+
     pub fn save_to_file(&self, path: &str) -> Result<()> {
         let content = toml::to_string_pretty(self)?;
         std::fs::write(path, content)?;
@@ -2172,6 +2215,7 @@ impl SystemConfig {
 #### 6.3 Device Manager
 
 **File: `bin/src/device_manager.rs`**
+
 ```rust
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -2199,7 +2243,7 @@ impl DeviceManager {
             poll_tasks: Arc::new(RwLock::new(HashMap::new())),
         }
     }
-    
+
     pub async fn start_device_polling(&self, configs: Vec<DeviceConfig>) -> Result<()> {
         for config in configs {
             if config.enabled {
@@ -2208,49 +2252,49 @@ impl DeviceManager {
         }
         Ok(())
     }
-    
+
     async fn start_device_connection(&self, config: DeviceConfig) -> Result<()> {
         tracing::info!("Starting device connection: {} ({})", config.name, config.protocol);
-        
+
         // Get protocol and create connection
         let protocol = self.protocol_registry.get_protocol(&config.protocol)
             .ok_or_else(|| anyhow::anyhow!("Protocol not found: {}", config.protocol))?;
-            
+
         let connection = protocol.connect(&config).await?;
         let connection = Arc::new(RwLock::new(connection));
-        
+
         // Store connection
         {
             let mut connections = self.active_connections.write().await;
             connections.insert(config.id.clone(), connection.clone());
         }
-        
+
         // Start polling task
         let poll_task = self.create_poll_task(config, connection).await;
-        
+
         {
             let mut tasks = self.poll_tasks.write().await;
             tasks.insert(config.id.clone(), poll_task);
         }
-        
+
         Ok(())
     }
-    
+
     async fn create_poll_task(
-        &self, 
-        config: DeviceConfig, 
+        &self,
+        config: DeviceConfig,
         connection: Arc<RwLock<Box<dyn DeviceConnection>>>
     ) -> JoinHandle<()> {
         let storage = self.storage.clone();
         let device_id = config.id.clone();
         let poll_interval = Duration::from_secs(config.poll_interval_seconds as u64);
-        
+
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(poll_interval);
-            
+
             loop {
                 interval.tick().await;
-                
+
                 // Read data from device
                 let device_data = {
                     let mut conn = connection.write().await;
@@ -2262,28 +2306,28 @@ impl DeviceManager {
                         }
                     }
                 };
-                
+
                 // Store data
                 if let Err(e) = storage.store_device_data(&device_data).await {
                     tracing::error!("Failed to store data for {}: {}", device_id, e);
                 }
-                
+
                 tracing::debug!("Collected data from {}", device_id);
             }
         })
     }
-    
+
     pub async fn stop_all_devices(&self) {
         let mut tasks = self.poll_tasks.write().await;
         for (device_id, task) in tasks.drain() {
             tracing::info!("Stopping device polling: {}", device_id);
             task.abort();
         }
-        
+
         let mut connections = self.active_connections.write().await;
         connections.clear();
     }
-    
+
     pub async fn get_active_device_ids(&self) -> Vec<String> {
         let connections = self.active_connections.read().await;
         connections.keys().cloned().collect()
@@ -2294,6 +2338,7 @@ impl DeviceManager {
 #### 6.4 Main Application
 
 **File: `bin/src/main.rs`**
+
 ```rust
 use clap::Parser;
 use anyhow::Result;
@@ -2312,11 +2357,11 @@ struct Cli {
     /// Configuration file path
     #[arg(short, long, default_value = "system.toml")]
     config: PathBuf,
-    
+
     /// Initialize configuration file
     #[arg(long)]
     init_config: bool,
-    
+
     /// Discover devices and exit
     #[arg(long)]
     discover: bool,
@@ -2325,7 +2370,7 @@ struct Cli {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-    
+
     // Initialize tracing
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -2333,7 +2378,7 @@ async fn main() -> Result<()> {
                 .unwrap_or_else(|_| "solar_monitor=info".into())
         )
         .init();
-    
+
     // Handle init-config
     if cli.init_config {
         let config = SystemConfig::default();
@@ -2341,7 +2386,7 @@ async fn main() -> Result<()> {
         println!("Created default configuration: {}", cli.config.display());
         return Ok(());
     }
-    
+
     // Load configuration
     let config = if cli.config.exists() {
         SystemConfig::load_from_file(cli.config.to_str().unwrap())?
@@ -2349,10 +2394,10 @@ async fn main() -> Result<()> {
         tracing::warn!("Configuration file not found, using defaults");
         SystemConfig::default()
     };
-    
+
     tracing::info!("Starting Universal Solar Monitor");
     tracing::info!("Configuration: {}", cli.config.display());
-    
+
     // Initialize storage
     let storage_config = solar_monitor_storage::StorageConfig {
         database_path: config.storage.database_path,
@@ -2361,30 +2406,30 @@ async fn main() -> Result<()> {
         enable_aggregation: config.storage.enable_aggregation,
     };
     let storage = solar_monitor_storage::DataStore::new(storage_config).await?;
-    
+
     // Initialize protocol registry
     let protocol_registry = solar_monitor_protocols::create_protocol_registry();
-    
+
     // Handle device discovery
     if cli.discover {
         return run_device_discovery(protocol_registry).await;
     }
-    
+
     // Convert and store device configurations
     let device_configs = convert_device_configs(config.device)?;
     for device_config in &device_configs {
         storage.store_device_config(device_config).await?;
     }
-    
+
     // Start device manager
     let device_manager = DeviceManager::new(protocol_registry.clone(), storage.clone());
     device_manager.start_device_polling(device_configs).await?;
-    
+
     // Start API server
     let api_task = tokio::spawn(async move {
         solar_monitor_api::create_server(storage, protocol_registry).await
     });
-    
+
     // Wait for shutdown signal
     tokio::select! {
         result = api_task => {
@@ -2396,16 +2441,16 @@ async fn main() -> Result<()> {
             tracing::info!("Shutdown signal received");
         }
     }
-    
+
     device_manager.stop_all_devices().await;
     tracing::info!("Universal Solar Monitor stopped");
-    
+
     Ok(())
 }
 
 async fn run_device_discovery(protocol_registry: solar_monitor_core::ProtocolRegistry) -> Result<()> {
     tracing::info!("Running device discovery...");
-    
+
     let scan_config = solar_monitor_core::ScanConfig {
         serial_ports: vec![
             "/dev/ttyUSB0".to_string(),
@@ -2415,26 +2460,26 @@ async fn run_device_discovery(protocol_registry: solar_monitor_core::ProtocolReg
         can_interfaces: vec!["can0".to_string()],
         timeout_seconds: 10,
     };
-    
+
     let discovered = protocol_registry.discover_all_devices(&scan_config).await?;
-    
+
     if discovered.is_empty() {
         println!("No devices discovered");
     } else {
         println!("Discovered {} device(s):", discovered.len());
         for device in &discovered {
-            println!("  - {} ({:?}) via {} protocol", 
+            println!("  - {} ({:?}) via {} protocol",
                 device.name, device.device_type, device.protocol);
             println!("    Connection: {:?}", device.connection_params);
         }
     }
-    
+
     Ok(())
 }
 
 fn convert_device_configs(configs: Vec<config::DeviceConfigFile>) -> Result<Vec<solar_monitor_core::DeviceConfig>> {
     let mut device_configs = Vec::new();
-    
+
     for config in configs {
         let device_type = match config.device_type.as_str() {
             "SolarInverter" => solar_monitor_core::DeviceType::SolarInverter,
@@ -2443,7 +2488,7 @@ fn convert_device_configs(configs: Vec<config::DeviceConfigFile>) -> Result<Vec<
             "EnergyMeter" => solar_monitor_core::DeviceType::EnergyMeter,
             _ => return Err(anyhow::anyhow!("Unknown device type: {}", config.device_type)),
         };
-        
+
         device_configs.push(solar_monitor_core::DeviceConfig {
             id: config.id,
             name: config.name,
@@ -2454,7 +2499,7 @@ fn convert_device_configs(configs: Vec<config::DeviceConfigFile>) -> Result<Vec<
             poll_interval_seconds: config.poll_interval_seconds,
         });
     }
-    
+
     Ok(device_configs)
 }
 ```
@@ -2462,6 +2507,7 @@ fn convert_device_configs(configs: Vec<config::DeviceConfigFile>) -> Result<Vec<
 #### 6.5 Example Configuration File
 
 **File: `system.toml`**
+
 ```toml
 [system]
 bind_address = "0.0.0.0"
@@ -2504,7 +2550,7 @@ stop_bits = "1"
 # device_type = "BatterySystem"
 # enabled = true
 # poll_interval_seconds = 60
-# 
+#
 # [device.connection_params]
 # serial_port = "/dev/ttyUSB1"
 # baud_rate = "9600"

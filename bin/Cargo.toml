@@ -13,6 +13,19 @@ solar-monitor-core = { path = "../core" }
 solar-monitor-protocols = { path = "../protocols" }
 solar-monitor-storage = { path = "../storage" }
 solar-monitor-api = { path = "../api" }
-axum = { version = "0.7", default-features = false, features = ["tokio", "http1", "ws", "macros", "json"] }
+axum = { version = "0.8", default-features = false, features = [
+    "tokio",
+    "http1",
+    "ws",
+    "macros",
+    "json",
+] }
 tokio = { version = "1.37", features = ["rt-multi-thread", "macros"] }
 anyhow = "1.0"
+tower = "0.5"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4.5", features = ["derive"] }
+serialport = "4.4"
+
+[features]
+openapi = ["solar-monitor-api/openapi"]
