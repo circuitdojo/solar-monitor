@@ -142,7 +142,7 @@ sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "chrono"
 # Configuration and serialization
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"
-typeshare = "1.0"
+specta = "1.0"
 
 # Static asset embedding
 rust-embed = { version = "8.0", features = ["compression"] }
@@ -154,8 +154,8 @@ inventory = "0.3"
 sysinfo = "0.29"
 
 [build-dependencies]
-# Build script for asset preparation
-typeshare = "1.0"
+# Build script for asset preparation (Specta export handled by a bin)
+specta = "1.0"
 
 [profile.release]
 # Optimize for size and performance on edge devices
@@ -194,16 +194,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn generate_typescript_types() -> Result<(), Box<dyn std::error::Error>> {
-    typeshare::generate_types(
-        &[
-            "src/types/mod.rs",
-            "src/api/dtos.rs",
-        ],
-        "frontend/src/types/",
-        typeshare::TypescriptTarget::default(),
-    )?;
-    
-    println!("Generated TypeScript types");
+    // Use: cargo run -p contracts --bin export_types
+    // to regenerate TypeScript types into types/ts/
     Ok(())
 }
 

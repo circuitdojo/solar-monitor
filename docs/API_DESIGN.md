@@ -82,8 +82,8 @@ impl CoreEngine {
 
 ### 2. Data Transfer Objects (DTOs)
 ```rust
-// Shared types using Typeshare for frontend compatibility
-#[derive(Debug, Clone, Serialize, Deserialize, Typeshare)]
+// Shared types using Specta for frontend compatibility
+#[derive(Debug, Clone, Serialize, Deserialize)] // #[derive(specta::Type)] in code
 #[serde(rename_all = "camelCase")]
 pub struct DeviceDto {
     pub id: String,
@@ -97,7 +97,7 @@ pub struct DeviceDto {
     pub metadata: HashMap<String, String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Typeshare)]
+#[derive(Debug, Clone, Serialize, Deserialize)] // #[derive(specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub enum DeviceTypeDto {
     SolarInverter,
@@ -106,7 +106,7 @@ pub enum DeviceTypeDto {
     EnergyMeter,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Typeshare)]
+#[derive(Debug, Clone, Serialize, Deserialize)] // #[derive(specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceStatusDto {
     pub id: String,
@@ -118,11 +118,11 @@ pub struct DeviceStatusDto {
     pub current_metrics: Option<DeviceMetricsDto>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Typeshare)]
+#[derive(Debug, Clone, Serialize, Deserialize)] // #[derive(specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub enum HealthStatusDto { Healthy, Warning, Critical, Offline }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Typeshare)]
+#[derive(Debug, Clone, Serialize, Deserialize)] // #[derive(specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceMetricsDto {
     pub timestamp: String, // ISO 8601
@@ -146,7 +146,7 @@ pub struct DeviceMetricsDto {
     pub custom_metrics: HashMap<String, f64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Typeshare)]
+#[derive(Debug, Clone, Serialize, Deserialize)] // #[derive(specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SystemStatusDto {
     pub uptime_seconds: u64,
@@ -160,7 +160,7 @@ pub struct SystemStatusDto {
     pub storage_usage: StorageUsageDto,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Typeshare)]
+#[derive(Debug, Clone, Serialize, Deserialize)] // #[derive(specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ResourceUsageDto {
     pub current: f64,
@@ -444,7 +444,7 @@ pub struct DeviceListParams {
 }
 
 // DTOs for runtime device management
-#[derive(Debug, Clone, Serialize, Deserialize, Typeshare)]
+#[derive(Debug, Clone, Serialize, Deserialize)] // #[derive(specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AddDeviceRequestDto {
     pub name: String,
@@ -454,11 +454,11 @@ pub struct AddDeviceRequestDto {
     pub connection_params: HashMap<String, String>, // serial_port, baud_rate, etc.
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Typeshare)]
+#[derive(Debug, Clone, Serialize, Deserialize)] // #[derive(specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TestConnectionResponseDto { pub ok: bool, pub message: Option<String> }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Typeshare)]
+#[derive(Debug, Clone, Serialize, Deserialize)] // #[derive(specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TestConnectionParamsDto {
     pub device_type: DeviceTypeDto,
@@ -471,7 +471,7 @@ pub struct TestConnectionParamsDto {
 // Optional (defaults): data_bits=8, parity=none, stop_bits=1, timeout_seconds=3
 
 // Export/Import DTOs
-#[derive(Debug, Clone, Serialize, Deserialize, Typeshare)]
+#[derive(Debug, Clone, Serialize, Deserialize)] // #[derive(specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceConfigDto {
     pub id: String, // UUID
@@ -483,7 +483,7 @@ pub struct DeviceConfigDto {
     pub connection_params: HashMap<String, String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Typeshare)]
+#[derive(Debug, Clone, Serialize, Deserialize)] // #[derive(specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportDevicesResultDto {
     pub added: u32,
@@ -521,7 +521,7 @@ pub struct WebSocketManager {
     data_broadcast: broadcast::Sender<WebSocketMessage>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Typeshare)]
+#[derive(Debug, Clone, Serialize, Deserialize)] // #[derive(specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct WebSocketMessage {
     pub message_type: WebSocketMessageType,
@@ -529,7 +529,7 @@ pub struct WebSocketMessage {
     pub data: serde_json::Value,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Typeshare)]
+#[derive(Debug, Clone, Serialize, Deserialize)] // #[derive(specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum WebSocketMessageType {
     DeviceData,
@@ -541,7 +541,7 @@ pub enum WebSocketMessageType {
 }
 
 // WebSocket message handlers
-#[derive(Debug, Clone, Serialize, Deserialize, Typeshare)]
+#[derive(Debug, Clone, Serialize, Deserialize)] // #[derive(specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SubscriptionMessage {
     pub action: SubscriptionAction,
@@ -549,7 +549,7 @@ pub struct SubscriptionMessage {
     pub message_types: Option<Vec<WebSocketMessageType>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Typeshare)]
+#[derive(Debug, Clone, Serialize, Deserialize)] // #[derive(specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum SubscriptionAction {
     Subscribe,
@@ -742,7 +742,7 @@ impl IntoResponse for ApiError {
     }
 }
 
-#[derive(Serialize, Typeshare)]
+#[derive(Serialize)] // #[derive(specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ErrorResponse {
     pub error: String,

@@ -48,7 +48,7 @@ A device-agnostic, single-binary solar monitoring solution for inverters, batter
 - Backend: Rust with Tokio, Axum, SQLx, tokio-serial (RS485 first)
 - Database: SQLite (embedded, single file)
 - Frontend: Preact + TypeScript (embedded in binary)
-- Types: Typeshare for Rust/TypeScript synchronization
+- Types: Specta for Rust/TypeScript synchronization
 - Deployment: Single binary with systemd service
 
 ## Core Components
@@ -88,7 +88,7 @@ pub trait DeviceProtocol: Send + Sync {
 ### 2. Universal Data Model (Canonical)
 ```rust
 // Device-agnostic data structure that works for all device types
-#[derive(Serialize, Deserialize, Typeshare, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)] // #[derive(specta::Type)] in code
 #[serde(rename_all = "camelCase")]
 pub struct DeviceData {
     pub device_id: String,
@@ -100,7 +100,7 @@ pub struct DeviceData {
 }
 
 // Universal metrics that normalize data across all device types
-#[derive(Serialize, Deserialize, Typeshare, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)] // #[derive(specta::Type)] in code
 #[serde(rename_all = "camelCase")]
 pub struct DeviceMetrics {
     // Power metrics (all device types)
@@ -135,7 +135,7 @@ pub struct DeviceMetrics {
 }
 
 // Canonical device status for all components and API
-#[derive(Serialize, Deserialize, Typeshare, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)] // #[derive(specta::Type)] in code
 #[serde(rename_all = "camelCase")]
 pub struct DeviceStatus {
     pub is_connected: bool,
@@ -144,7 +144,7 @@ pub struct DeviceStatus {
     pub error_message: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Typeshare, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)] // #[derive(specta::Type)] in code
 #[serde(rename_all = "camelCase")]
 pub enum HealthStatus {
     Healthy,
@@ -238,7 +238,7 @@ tokio = { version = "1.0", features = ["full"] }
 axum = { version = "0.7", features = ["macros"] }
 sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite"] }
 serde = { version = "1.0", features = ["derive"] }
-typeshare = "1.0"
+specta = "1.0"
 rust-embed = "8.0"
 tokio-serial = "5.4"
 
@@ -341,7 +341,7 @@ stop_bits = "1"
 3. **Storage**: Direct SQLite storage with simple schema
 4. **Web API + WS**: REST endpoints and WS upgrade on same port
 5. **Dashboard**: Preact frontend displays real-time metrics and charts
-6. **Type Safety**: Typeshare ensures Rust/TypeScript consistency
+6. **Type Safety**: Specta ensures Rust/TypeScript consistency
 
 ## Success Criteria
 
@@ -369,15 +369,15 @@ This specification focuses on delivering real value with minimal complexity, bui
 These types are canonical for all components. API DTOs and DB schemas must map directly to these.
 
 ```rust
-#[derive(Serialize, Deserialize, Typeshare, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)] // #[derive(specta::Type)] in code
 #[serde(rename_all = "camelCase")]
 pub enum DeviceType { SolarInverter, BatterySystem, ChargeController, EnergyMeter }
 
-#[derive(Serialize, Deserialize, Typeshare, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)] // #[derive(specta::Type)] in code
 #[serde(rename_all = "camelCase")]
 pub enum HealthStatus { Healthy, Warning, Critical, Offline }
 
-#[derive(Serialize, Deserialize, Typeshare, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)] // #[derive(specta::Type)] in code
 #[serde(rename_all = "camelCase")]
 pub struct DeviceStatus {
     pub is_connected: bool,
@@ -386,7 +386,7 @@ pub struct DeviceStatus {
     pub error_message: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Typeshare, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)] // #[derive(specta::Type)] in code
 #[serde(rename_all = "camelCase")]
 pub struct DeviceMetrics {
     pub input_power_watts: Option<f64>,
@@ -409,7 +409,7 @@ pub struct DeviceMetrics {
     pub custom_metrics: HashMap<String, f64>,
 }
 
-#[derive(Serialize, Deserialize, Typeshare, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)] // #[derive(specta::Type)] in code
 #[serde(rename_all = "camelCase")]
 pub struct DeviceData {
     pub device_id: String, // UUID
