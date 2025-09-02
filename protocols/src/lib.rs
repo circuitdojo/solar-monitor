@@ -213,67 +213,149 @@ struct Eg4ModbusConn {
     baud: u32,
     unit_id: u8,
     timeout_secs: u64,
+    handle: std::sync::Arc<PortHandle>,
 }
 
-// Global per-port async locks to serialize access to the same serial device
-static PORT_LOCKS: Lazy<
-    std::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>>,
+// Port actor machinery
+#[derive(Clone)]
+struct PortHandle {
+    tx: tokio::sync::mpsc::Sender<PortRequest>,
+}
+
+enum PortRequest {
+    ReadInput {
+        unit_id: u8,
+        addr: u16,
+        qty: u16,
+        resp: tokio::sync::oneshot::Sender<anyhow::Result<Vec<u16>>>,
+    },
+}
+
+impl PortHandle {
+    async fn read_input_registers(&self, unit_id: u8, addr: u16, qty: u16) -> Result<Vec<u16>> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.tx
+            .send(PortRequest::ReadInput {
+                unit_id,
+                addr,
+                qty,
+                resp: tx,
+            })
+            .await
+            .map_err(|_| anyhow::anyhow!("port actor unavailable"))?;
+        rx.await.map_err(|_| anyhow::anyhow!("port actor dropped"))?
+    }
+}
+
+static PORT_ACTORS: Lazy<
+    std::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<PortHandle>>>,
 > = Lazy::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+async fn get_or_spawn_port_actor(
+    path: &str,
+    baud: u32,
+    timeout_secs: u64,
+) -> std::sync::Arc<PortHandle> {
+    let key = format!("{}@{}", path, baud);
+    if let Some(h) = PORT_ACTORS.lock().unwrap().get(&key).cloned() {
+        return h;
+    }
+    let (tx, rx) = tokio::sync::mpsc::channel::<PortRequest>(32);
+    let handle = std::sync::Arc::new(PortHandle { tx });
+    PORT_ACTORS
+        .lock()
+        .unwrap()
+        .insert(key.clone(), handle.clone());
+    let path_s = path.to_string();
+    tokio::spawn(async move {
+        run_port_actor(path_s, baud, timeout_secs, rx).await;
+        // on exit, remove?
+        let _ = PORT_ACTORS.lock().unwrap().remove(&key);
+    });
+    handle
+}
+
+async fn run_port_actor(
+    path: String,
+    baud: u32,
+    timeout_secs: u64,
+    mut rx: tokio::sync::mpsc::Receiver<PortRequest>,
+) {
+    use tokio_modbus::prelude::*;
+    use tokio_modbus::prelude::rtu;
+    use tokio_serial::{DataBits, Parity, SerialPortBuilderExt, SerialStream, StopBits};
+    use tokio::time::{timeout, Duration};
+
+    loop {
+        // open port and attach RTU context without fixed slave
+        let builder = tokio_serial::new(&path, baud)
+            .data_bits(DataBits::Eight)
+            .parity(Parity::None)
+            .stop_bits(StopBits::One)
+            .timeout(std::time::Duration::from_secs(timeout_secs));
+        let port = match SerialStream::open(&builder) {
+            Ok(p) => p,
+            Err(_e) => {
+                let _ = tokio::time::sleep(Duration::from_millis(500)).await;
+                if rx.recv().await.is_none() { break; }
+                continue;
+            }
+        };
+        let mut ctx = rtu::attach(port);
+
+        while let Some(msg) = rx.recv().await {
+            let res: anyhow::Result<Vec<u16>> = match msg {
+                PortRequest::ReadInput { unit_id, addr, qty, .. } => {
+                    // Switch slave then read
+                    ctx.set_slave(Slave(unit_id));
+                    match timeout(Duration::from_secs(timeout_secs), ctx.read_input_registers(addr, qty)).await {
+                        Ok(Ok(regs)) => regs.map_err(|e| anyhow::anyhow!(e)),
+                        Ok(Err(e)) => Err(anyhow::anyhow!(e)),
+                        Err(_) => Err(anyhow::anyhow!("timeout")),
+                    }
+                }
+            };
+            // send response back to requester
+            match msg { PortRequest::ReadInput { resp, .. } => { let _ = resp.send(res); } }
+        }
+        // channel closed, exit loop
+        break;
+    }
+}
+
+async fn read_full(port: &mut tokio_serial::SerialStream, mut buf: &mut [u8]) -> std::io::Result<()> {
+    use tokio::io::AsyncReadExt;
+    while !buf.is_empty() {
+        let n = port.read(buf).await?;
+        if n == 0 {
+            return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "eof"));
+        }
+        let tmp = buf;
+        buf = &mut tmp[n..];
+    }
+    Ok(())
+}
 
 impl Eg4ModbusConn {
     async fn open(path: &str, baud: u32, timeout_secs: u64, unit_id: u8) -> Result<Self> {
+        let handle = get_or_spawn_port_actor(path, baud, timeout_secs).await;
         Ok(Self {
             path: path.to_string(),
             baud,
             unit_id,
             timeout_secs,
+            handle,
         })
     }
 
     async fn read_input_registers(&mut self, addr: u16, qty: u16) -> Result<Vec<u8>> {
-        use tokio_modbus::prelude::rtu;
-        use tokio_modbus::prelude::*;
-        use tokio_serial::{DataBits, Parity, SerialStream, StopBits};
-        use tokio::time::{timeout, Duration};
-        // Acquire per-port mutex to avoid concurrent access
-        let lock = {
-            let mut m = PORT_LOCKS.lock().unwrap();
-            m.entry(self.path.clone())
-                .or_insert_with(|| std::sync::Arc::new(tokio::sync::Mutex::new(())))
-                .clone()
-        };
-        let _guard = lock.lock().await;
-
-        let builder = tokio_serial::new(&self.path, self.baud)
-            .data_bits(DataBits::Eight)
-            .parity(Parity::None)
-            .stop_bits(StopBits::One)
-            .timeout(std::time::Duration::from_secs(self.timeout_secs));
-        let port = SerialStream::open(&builder)?;
-        let mut ctx = rtu::attach_slave(port, Slave(self.unit_id));
-        // Bound the Modbus read to avoid indefinite hangs
-        let regs = match timeout(
-            Duration::from_secs(self.timeout_secs),
-            ctx.read_input_registers(addr, qty),
-        )
-        .await
-        {
-            Ok(Ok(regs)) => regs,
-            Ok(Err(e)) => {
-                let _ = ctx.disconnect().await; // best-effort cleanup
-                return Err(anyhow!(e));
-            }
-            Err(_) => {
-                let _ = ctx.disconnect().await; // best-effort cleanup
-                return Err(anyhow!("modbus read timeout"));
-            }
-        }?;
-        ctx.disconnect().await?;
-        let mut data = Vec::with_capacity(regs.len() * 2);
-        for r in regs {
-            data.extend_from_slice(&r.to_le_bytes());
-        }
-        Ok(data)
+        let regs = self
+            .handle
+            .read_input_registers(self.unit_id, addr, qty)
+            .await?;
+        let mut out = Vec::with_capacity(regs.len() * 2);
+        for r in regs { out.extend_from_slice(&r.to_le_bytes()); }
+        Ok(out)
     }
 }
 
@@ -489,40 +571,8 @@ async fn try_read_basic_modbus(
     unit_id: u8,
     timeout_secs: u64,
 ) -> Result<()> {
-    use tokio_modbus::prelude::rtu;
-    use tokio_modbus::prelude::*;
-    use tokio_serial::{DataBits, Parity, SerialStream, StopBits};
-    use tokio::time::{timeout, Duration};
-    // Acquire per-port mutex to avoid concurrent use during discovery too
-    let lock = {
-        let mut m = PORT_LOCKS.lock().unwrap();
-        m.entry(path.to_string())
-            .or_insert_with(|| std::sync::Arc::new(tokio::sync::Mutex::new(())))
-            .clone()
-    };
-    let _guard = lock.lock().await;
-    let builder = tokio_serial::new(path, baud)
-        .data_bits(DataBits::Eight)
-        .parity(Parity::None)
-        .stop_bits(StopBits::One)
-        .timeout(std::time::Duration::from_secs(timeout_secs));
-    let port = SerialStream::open(&builder)?;
-    let mut ctx = rtu::attach_slave(port, Slave(unit_id));
-    // Bound the Modbus read with an explicit timeout to avoid hanging discovery
-    match timeout(Duration::from_secs(timeout_secs), ctx.read_input_registers(0, 2)).await {
-        Ok(Ok(_)) => {
-            // success
-        }
-        Ok(Err(e)) => {
-            let _ = ctx.disconnect().await; // best-effort cleanup
-            return Err(anyhow!(e));
-        }
-        Err(_) => {
-            let _ = ctx.disconnect().await; // best-effort cleanup
-            return Err(anyhow!("modbus read timeout"));
-        }
-    }
-    ctx.disconnect().await?;
+    let handle = get_or_spawn_port_actor(path, baud, timeout_secs).await;
+    let _ = handle.read_input_registers(unit_id, 0, 2).await?;
     Ok(())
 }
 
