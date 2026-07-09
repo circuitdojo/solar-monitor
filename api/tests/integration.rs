@@ -47,13 +47,14 @@ async fn test_state_with_mock() -> Arc<api::AppState> {
         }
         fn metadata(&self) -> core::ProtocolMetadata {
             core::ProtocolMetadata {
+                protocol_name: "mock-proto",
                 name: "Mock",
                 version: "0.0.1",
                 description: "Test mock",
                 supported_device_types: &[dto::DeviceType::SolarInverter],
                 capabilities: core::ProtocolCapabilities {
                     supports_discovery: false,
-                    supports_commands: true,
+                    supports_settings: false,
                     supports_real_time: true,
                     max_concurrent_connections: Some(10),
                 },
@@ -74,6 +75,12 @@ async fn test_state_with_mock() -> Arc<api::AppState> {
         ) -> anyhow::Result<Box<dyn core::DeviceConnection>> {
             Ok(Box::new(MockConn { n: 0 }))
         }
+        async fn settings(
+            &self,
+            _config: &core::DeviceConfig,
+        ) -> anyhow::Result<Option<Box<dyn core::SettingsAccess>>> {
+            Ok(None)
+        }
     }
     #[async_trait]
     impl core::DeviceConnection for MockConn {
@@ -92,9 +99,6 @@ async fn test_state_with_mock() -> Arc<api::AppState> {
                 },
                 raw_data: None,
             })
-        }
-        async fn send_command(&mut self, _command: &str) -> anyhow::Result<String> {
-            Ok("OK".into())
         }
         fn is_connected(&self) -> bool {
             true
@@ -183,8 +187,10 @@ async fn health_status_protocols_and_devices_list() {
     assert!(res.status().is_success());
     let body = res.into_body().collect().await.unwrap().to_bytes();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert!(v["protocols"].is_array());
-    assert!(v["protocols"].as_array().unwrap().len() >= 1);
+    let protos = v.as_array().unwrap();
+    assert!(!protos.is_empty());
+    assert!(protos[0].get("protocolName").is_some());
+    assert!(protos[0]["capabilities"].get("supportsSettings").is_some());
 
     // Devices (empty)
     let res = app
@@ -335,10 +341,11 @@ async fn devices_crud_and_errors() {
 }
 
 #[tokio::test]
-async fn device_command_and_range_validation() {
+async fn settings_unknown_protocol_and_range_validation() {
     let app = test_app(":memory:").await;
 
-    // Upsert disabled device so command attempts won't spawn polling
+    // Upsert a disabled device with a protocol no longer in the registry
+    // (e.g. an orphaned row from the removed PI30 driver)
     let create_body = json!({
         "id": "dev2",
         "name": "Inverter B",
@@ -351,18 +358,25 @@ async fn device_command_and_range_validation() {
     let res = put_json(&app, "/api/v1/devices/dev2", create_body).await;
     assert!(res.status().is_success());
 
-    // Command endpoint should error (no real serial), returning JSON error
-    let res = post_json(
-        &app,
-        "/api/v1/devices/dev2/command",
-        json!({"command": "QID"}),
-    )
-    .await;
-    assert!(res.status().is_client_error() || res.status().is_server_error());
+    // It still lists, but without settings support
+    let res = get(&app, "/api/v1/devices").await;
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let dev = v
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["id"] == "dev2")
+        .unwrap();
+    assert_eq!(dev["supportsSettings"], false);
+
+    // Settings endpoint rejects the unknown protocol with a client error
+    let res = get(&app, "/api/v1/devices/dev2/settings").await;
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
     let body = res.into_body().collect().await.unwrap().to_bytes();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert!(v.get("error").is_some());
-    assert!(v.get("details").is_some());
+    assert!(v["details"].as_str().unwrap().contains("unknown protocol"));
 
     // Range validation: bad timestamp should return 400 with error JSON
     let res = get(&app, "/api/v1/devices/dev2/data?start=not-a-time").await;
@@ -373,16 +387,11 @@ async fn device_command_and_range_validation() {
 }
 
 #[tokio::test]
-async fn command_404_and_discovery_empty() {
+async fn settings_404_and_discovery_empty() {
     let app = test_app(":memory:").await;
 
-    // Command to non-existent device should be 404 with error JSON
-    let res = post_json(
-        &app,
-        "/api/v1/devices/does-not-exist/command",
-        json!({"command": "QID"}),
-    )
-    .await;
+    // Settings on a non-existent device should be 404 with error JSON
+    let res = get(&app, "/api/v1/devices/does-not-exist/settings").await;
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
     let body = res.into_body().collect().await.unwrap().to_bytes();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -487,35 +496,31 @@ async fn enabling_creates_task_and_delete_aborts() {
 }
 
 #[tokio::test]
-async fn mock_command_returns_ok() {
+async fn settings_unsupported_by_protocol_returns_400() {
     let state = test_state_with_mock().await;
     let app = api::router(state.clone());
 
-    // Create device with mock protocol (disabled)
+    // Create device with mock protocol (disabled); mock exposes no settings
     let body = json!({
-        "id": "devCmd",
-        "name": "MockCmd",
+        "id": "devNoSettings",
+        "name": "MockNoSettings",
         "deviceType": "solarInverter",
         "protocolName": "mock-proto",
         "enabled": false,
         "pollIntervalSeconds": 5,
         "connectionParams": {}
     });
-    let res = put_json(&app, "/api/v1/devices/devCmd", body).await;
+    let res = put_json(&app, "/api/v1/devices/devNoSettings", body).await;
     assert!(res.status().is_success());
 
-    // Send command and expect OK
-    let res = post_json(
-        &app,
-        "/api/v1/devices/devCmd/command",
-        json!({"command": "PING"}),
-    )
-    .await;
-    assert!(res.status().is_success());
+    let res = get(&app, "/api/v1/devices/devNoSettings/settings").await;
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
     let body = res.into_body().collect().await.unwrap().to_bytes();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(v["ok"], true);
-    assert_eq!(v["response"], "OK");
+    assert!(v["details"]
+        .as_str()
+        .unwrap()
+        .contains("settings not supported"));
 }
 
 #[tokio::test]

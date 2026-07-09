@@ -74,7 +74,6 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/api/v1/devices/{id}",
             get(get_device).put(update_device).delete(remove_device),
         )
-        .route("/api/v1/devices/{id}/command", post(send_device_command))
         .route("/api/v1/devices/{id}/settings", get(get_device_settings))
         .route(
             "/api/v1/devices/{id}/settings/{key}",
@@ -175,15 +174,14 @@ async fn discover_devices(
     };
 
     let mut found = Vec::new();
-    if let Some(proto) = state
-        .registry
-        .get_protocol("eg4-6000xp-modbus")
-        .or_else(|| state.registry.get_protocol("eg4-pi30-rs485"))
-    {
-        let devices = proto
-            .discover_devices(&scan)
-            .await
-            .map_err(|e| ApiError::Internal(e.to_string()))?;
+    for proto in state.registry.protocols() {
+        let devices = match proto.discover_devices(&scan).await {
+            Ok(d) => d,
+            Err(e) => {
+                tracing::warn!("discovery via {} failed: {}", proto.protocol_name(), e);
+                continue;
+            }
+        };
         for d in devices {
             found.push(DiscoveredDeviceDto {
                 id: d.id,
@@ -214,6 +212,11 @@ async fn list_devices(
         .into_iter()
         .map(|c| {
             let is_polling = tasks.contains_key(&c.id);
+            let supports_settings = state
+                .registry
+                .get_protocol(&c.protocol)
+                .map(|p| p.metadata().capabilities.supports_settings)
+                .unwrap_or(false);
             contracts::DeviceListItemDto {
                 id: c.id,
                 name: c.name,
@@ -223,6 +226,7 @@ async fn list_devices(
                 poll_interval_seconds: c.poll_interval_seconds,
                 connection_params: c.connection_params,
                 is_polling,
+                supports_settings,
             }
         })
         .collect();
@@ -296,7 +300,7 @@ pub async fn start_polling(state: Arc<AppState>, cfg: core::DeviceConfig) -> any
     let proto = state
         .registry
         .get_protocol(&cfg.protocol)
-        .ok_or_else(|| anyhow::anyhow!("unsupported protocol"))?;
+        .ok_or_else(|| anyhow::anyhow!("unknown protocol '{}'", cfg.protocol))?;
 
     // Connect before spawning, to validate params
     let mut conn = proto.connect(&cfg).await?;
@@ -461,27 +465,26 @@ async fn system_status(
 
 async fn list_protocols(
     axum::extract::State(state): axum::extract::State<Arc<AppState>>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<Vec<contracts::ProtocolInfoDto>>> {
     let protos = state
         .registry
         .list_protocols()
         .into_iter()
-        .map(|m| {
-            serde_json::json!({
-                "name": m.name,
-                "version": m.version,
-                "description": m.description,
-                "supportedDeviceTypes": m.supported_device_types,
-                "capabilities": {
-                    "supportsDiscovery": m.capabilities.supports_discovery,
-                    "supportsCommands": m.capabilities.supports_commands,
-                    "supportsRealTime": m.capabilities.supports_real_time,
-                    "maxConcurrentConnections": m.capabilities.max_concurrent_connections,
-                }
-            })
+        .map(|m| contracts::ProtocolInfoDto {
+            protocol_name: m.protocol_name.to_string(),
+            name: m.name.to_string(),
+            version: m.version.to_string(),
+            description: m.description.to_string(),
+            supported_device_types: m.supported_device_types.to_vec(),
+            capabilities: contracts::ProtocolCapabilitiesDto {
+                supports_discovery: m.capabilities.supports_discovery,
+                supports_settings: m.capabilities.supports_settings,
+                supports_real_time: m.capabilities.supports_real_time,
+                max_concurrent_connections: m.capabilities.max_concurrent_connections,
+            },
         })
         .collect::<Vec<_>>();
-    Ok(Json(serde_json::json!({"protocols": protos})))
+    Ok(Json(protos))
 }
 
 async fn get_device(
@@ -539,80 +542,41 @@ async fn update_device(
     Ok(Json(serde_json::json!({"status":"updated","id": id })))
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct CommandRequest {
-    command: String,
-}
-
-async fn send_device_command(
-    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
-    axum::extract::Path(id): axum::extract::Path<String>,
-    Json(raw): Json<serde_json::Value>,
-) -> ApiResult<Json<serde_json::Value>> {
-    let cfg = state
-        .store
-        .get_device_config(&id)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
-        .ok_or_else(|| ApiError::NotFound("device not found".into()))?;
-    if cfg.protocol == "eg4-6000xp-modbus" {
-        let req: contracts::DeviceCommandRequest = serde_json::from_value(raw)
-            .map_err(|e| ApiError::BadRequest(format!("invalid command: {}", e)))?;
-        match req {
-            contracts::DeviceCommandRequest::Eg4_6000xp_Modbus { command } => {
-                solar_monitor_protocols::eg4_6000xp_execute(&cfg, &command)
-                    .await
-                    .map_err(|e| ApiError::Internal(e.to_string()))?;
-                return Ok(Json(serde_json::json!({"ok": true})));
-            }
-        }
-    }
-    // Generic path: forward a raw command string through the protocol driver
-    let command = raw
-        .get("command")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| ApiError::BadRequest("missing command".into()))?;
-    let proto = state
-        .registry
-        .get_protocol(&cfg.protocol)
-        .ok_or_else(|| ApiError::BadRequest("unsupported protocol".into()))?;
-    let mut conn = proto
-        .connect(&cfg)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-    let response = conn
-        .send_command(command)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-    Ok(Json(serde_json::json!({"ok": true, "response": response})))
-}
-
-async fn settings_device_config(
+/// Resolve a device's settings access via its protocol, or fail with a
+/// client error if the device/protocol is unknown or has no settings.
+async fn device_settings_access(
     state: &AppState,
     id: &str,
-) -> Result<core::DeviceConfig, ApiError> {
+) -> Result<Box<dyn core::SettingsAccess>, ApiError> {
     let cfg = state
         .store
         .get_device_config(id)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?
         .ok_or_else(|| ApiError::NotFound("device not found".into()))?;
-    if cfg.protocol != "eg4-6000xp-modbus" {
-        return Err(ApiError::BadRequest(format!(
-            "settings not supported for protocol '{}'",
-            cfg.protocol
-        )));
-    }
-    Ok(cfg)
+    let proto = state
+        .registry
+        .get_protocol(&cfg.protocol)
+        .ok_or_else(|| ApiError::BadRequest(format!("unknown protocol '{}'", cfg.protocol)))?;
+    proto
+        .settings(&cfg)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or_else(|| {
+            ApiError::BadRequest(format!(
+                "settings not supported for protocol '{}'",
+                cfg.protocol
+            ))
+        })
 }
 
 async fn get_device_settings(
     axum::extract::State(state): axum::extract::State<Arc<AppState>>,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> ApiResult<Json<Vec<contracts::DeviceSettingDto>>> {
-    let cfg = settings_device_config(&state, &id).await?;
-    let settings = solar_monitor_protocols::eg4_6000xp_read_settings(&cfg)
+    let access = device_settings_access(&state, &id).await?;
+    let settings = access
+        .read_settings()
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
     Ok(Json(settings))
@@ -623,8 +587,9 @@ async fn write_device_setting(
     axum::extract::Path((id, key)): axum::extract::Path<(String, String)>,
     Json(req): Json<contracts::WriteSettingRequestDto>,
 ) -> ApiResult<Json<contracts::DeviceSettingDto>> {
-    let cfg = settings_device_config(&state, &id).await?;
-    let setting = solar_monitor_protocols::eg4_6000xp_write_setting(&cfg, &key, &req.value)
+    let access = device_settings_access(&state, &id).await?;
+    let setting = access
+        .write_setting(&key, &req.value)
         .await
         .map_err(|e| ApiError::BadRequest(e.to_string()))?;
     Ok(Json(setting))
@@ -649,7 +614,7 @@ async fn get_device_data_range(
         .map(|s| chrono::DateTime::parse_from_rfc3339(s).map(|d| d.with_timezone(&chrono::Utc)))
         .transpose()
         .map_err(|_| ApiError::BadRequest("invalid end timestamp".into()))?
-        .unwrap_or_else(|| chrono::Utc::now());
+        .unwrap_or_else(chrono::Utc::now);
     let start = q
         .start
         .as_deref()
@@ -675,10 +640,8 @@ async fn dashboard_data(
         .map_err(|e| ApiError::Internal(e.to_string()))?;
     let mut out = Vec::new();
     for cfg in configs {
-        if let Ok(opt) = state.store.get_latest_device_data(&cfg.id).await {
-            if let Some(d) = opt {
-                out.push(d);
-            }
+        if let Ok(Some(d)) = state.store.get_latest_device_data(&cfg.id).await {
+            out.push(d);
         }
     }
     Ok(Json(out))
@@ -815,8 +778,11 @@ async fn openapi_json() -> Json<serde_json::Value> {
                 "put": {"summary": "Update device", "responses": {"200": {"description": "OK"}}},
                 "delete": {"summary": "Remove device", "responses": {"200": {"description": "OK"}}}
             },
-            "/api/v1/devices/{id}/command": {
-                "post": {"summary": "Send command", "responses": {"200": {"description": "OK"}, "4XX": {"description": "Error"}}}
+            "/api/v1/devices/{id}/settings": {
+                "get": {"summary": "Read device settings", "responses": {"200": {"description": "OK"}, "4XX": {"description": "Error"}}}
+            },
+            "/api/v1/devices/{id}/settings/{key}": {
+                "put": {"summary": "Write device setting", "responses": {"200": {"description": "OK"}, "4XX": {"description": "Error"}}}
             },
             "/api/v1/devices/{id}/data": {
                 "get": {"summary": "Device data range", "responses": {"200": {"description": "OK"}}}

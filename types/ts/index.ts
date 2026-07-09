@@ -12,7 +12,7 @@ export type DeviceConfigDto = { id: string; name: string; deviceType: DeviceType
 
 export type AddDeviceRequestDto = { id: string; name: string; deviceType: DeviceType; protocolName: string; enabled: boolean; pollIntervalSeconds: number; connectionParams: { [key: string]: string } }
 
-export type DeviceListItemDto = { id: string; name: string; deviceType: DeviceType; protocolName: string; enabled: boolean; pollIntervalSeconds: number; connectionParams: { [key: string]: string }; isPolling: boolean }
+export type DeviceListItemDto = { id: string; name: string; deviceType: DeviceType; protocolName: string; enabled: boolean; pollIntervalSeconds: number; connectionParams: { [key: string]: string }; isPolling: boolean; supportsSettings: boolean }
 
 export type TestConnectionParamsDto = { deviceType: DeviceType; protocolName: string; connectionParams: { [key: string]: string } }
 
@@ -26,11 +26,9 @@ export type SystemStatusDto = { uptimeSeconds: number; version: string; activeDe
 
 export type ErrorResponseDto = { error: string; details: string; timestamp: string }
 
-export type Eg4Command = { type: "writeRegister"; addr: number; value: number } | { type: "writeRegisters"; addr: number; values: number[] } | { type: "writeCoil"; addr: number; value: boolean } | { type: "writeCoils"; addr: number; values: boolean[] } | { type: "setMaxChargeCurrent"; amps: number }
+export type ProtocolCapabilitiesDto = { supportsDiscovery: boolean; supportsSettings: boolean; supportsRealTime: boolean; maxConcurrentConnections: number | null }
 
-export type DeviceCommandRequest = { protocol: "eg4-6000xp-modbus"; command: Eg4Command }
-
-export type DeviceCommandResponseDto = { ok: boolean; message: string | null }
+export type ProtocolInfoDto = { protocolName: string; name: string; version: string; description: string; supportedDeviceTypes: DeviceType[]; capabilities: ProtocolCapabilitiesDto }
 
 export type SettingValueDto = { kind: "number"; value: number; min: number; max: number; step: number; unit: string | null } | { kind: "toggle"; enabled: boolean } | { kind: "choice"; value: number; options: number[]; labels: string[] | null; unit: string | null } | { kind: "timeWindow"; start: string; end: string }
 

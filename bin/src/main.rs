@@ -62,6 +62,12 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
     let cli = Cli::parse();
     if cli.uninstall {
         uninstall_service(&cli)?;
@@ -110,16 +116,24 @@ async fn main() -> Result<()> {
             timeout_seconds: cli.timeout,
         };
 
-        // Only try Modbus RTU per current focus (PI30 skipped)
-        println!("Skipping PI30 discovery");
-        println!("Probing Modbus RTU (unit ids 1..3)...");
         let mut discovered = Vec::new();
-        if let Some(proto) = state.registry.get_protocol("eg4-6000xp-modbus") {
-            let mut found = proto.discover_devices(&scan).await.unwrap_or_default();
-            if !found.is_empty() {
-                println!("Found {} device(s) via eg4-6000xp-modbus", found.len());
+        for proto in state.registry.protocols() {
+            println!("Probing via {}...", proto.protocol_name());
+            match proto.discover_devices(&scan).await {
+                Ok(mut found) => {
+                    if !found.is_empty() {
+                        println!(
+                            "Found {} device(s) via {}",
+                            found.len(),
+                            proto.protocol_name()
+                        );
+                    }
+                    discovered.append(&mut found);
+                }
+                Err(e) => {
+                    println!("Discovery via {} failed: {}", proto.protocol_name(), e);
+                }
             }
-            discovered.append(&mut found);
         }
 
         if discovered.is_empty() {
@@ -144,7 +158,15 @@ async fn main() -> Result<()> {
                 .lock()
                 .await
                 .insert(cfg.id.clone(), cfg.clone());
-            let _ = solar_monitor_api::start_polling(state.clone(), cfg).await;
+            let (id, protocol) = (cfg.id.clone(), cfg.protocol.clone());
+            if let Err(e) = solar_monitor_api::start_polling(state.clone(), cfg).await {
+                tracing::warn!(
+                    "device {} (protocol '{}') not polling: {} — edit or remove it on the Devices page",
+                    id,
+                    protocol,
+                    e
+                );
+            }
         }
     }
 

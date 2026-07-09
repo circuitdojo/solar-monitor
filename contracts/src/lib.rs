@@ -99,6 +99,29 @@ pub struct DeviceListItemDto {
     pub poll_interval_seconds: u32,
     pub connection_params: std::collections::HashMap<String, String>,
     pub is_polling: bool,
+    pub supports_settings: bool,
+}
+
+#[derive(Type, Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProtocolCapabilitiesDto {
+    pub supports_discovery: bool,
+    pub supports_settings: bool,
+    pub supports_real_time: bool,
+    pub max_concurrent_connections: Option<u32>,
+}
+
+#[derive(Type, Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProtocolInfoDto {
+    /// Stable protocol id used in device configs (e.g. "eg4-6000xp-modbus").
+    pub protocol_name: String,
+    /// Human-readable display name.
+    pub name: String,
+    pub version: String,
+    pub description: String,
+    pub supported_device_types: Vec<DeviceType>,
+    pub capabilities: ProtocolCapabilitiesDto,
 }
 
 // API DTOs commonly used by the web layer
@@ -167,33 +190,6 @@ pub struct ErrorResponseDto {
     pub error: String,
     pub details: String,
     pub timestamp: String,
-}
-
-// Command contracts (typed, protocol-aware)
-
-#[derive(Type, Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", tag = "type")]
-pub enum Eg4Command {
-    WriteRegister { addr: u16, value: u16 },
-    WriteRegisters { addr: u16, values: Vec<u16> },
-    WriteCoil { addr: u16, value: bool },
-    WriteCoils { addr: u16, values: Vec<bool> },
-    // Higher-level named commands can be added here, e.g.:
-    SetMaxChargeCurrent { amps: f64 },
-}
-
-#[derive(Type, Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", tag = "protocol")]
-pub enum DeviceCommandRequest {
-    #[serde(rename = "eg4-6000xp-modbus")]
-    Eg4_6000xp_Modbus { command: Eg4Command },
-}
-
-#[derive(Type, Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DeviceCommandResponseDto {
-    pub ok: bool,
-    pub message: Option<String>,
 }
 
 // Device settings (typed, validated register-backed configuration)

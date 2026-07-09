@@ -13,6 +13,9 @@ pub fn version() -> &'static str {
 
 #[derive(Debug, Clone)]
 pub struct ProtocolMetadata {
+    /// Stable protocol id used in device configs (e.g. "eg4-6000xp-modbus").
+    pub protocol_name: &'static str,
+    /// Human-readable display name.
     pub name: &'static str,
     pub version: &'static str,
     pub description: &'static str,
@@ -23,7 +26,7 @@ pub struct ProtocolMetadata {
 #[derive(Debug, Clone)]
 pub struct ProtocolCapabilities {
     pub supports_discovery: bool,
-    pub supports_commands: bool,
+    pub supports_settings: bool,
     pub supports_real_time: bool,
     pub max_concurrent_connections: Option<u32>,
 }
@@ -62,19 +65,36 @@ pub trait DeviceProtocol: Send + Sync {
 
     async fn discover_devices(&self, scan_config: &ScanConfig) -> Result<Vec<DiscoveredDevice>>;
     async fn connect(&self, config: &DeviceConfig) -> Result<Box<dyn DeviceConnection>>;
+
+    /// Settings access for this device, or `None` if the protocol exposes no
+    /// configurable settings. Implementations expose only curated, validated
+    /// settings — never raw register writes.
+    async fn settings(&self, config: &DeviceConfig) -> Result<Option<Box<dyn SettingsAccess>>>;
 }
 
 #[async_trait]
 pub trait DeviceConnection: Send + Sync {
     async fn read_data(&mut self) -> Result<DeviceData>;
-    async fn send_command(&mut self, command: &str) -> Result<String>;
     fn is_connected(&self) -> bool;
     async fn health_check(&mut self) -> Result<()>;
+}
+
+/// Curated, validated read/write access to a device's configuration.
+#[async_trait]
+pub trait SettingsAccess: Send + Sync {
+    async fn read_settings(&self) -> Result<Vec<contracts::DeviceSettingDto>>;
+    async fn write_setting(&self, key: &str, value: &str) -> Result<contracts::DeviceSettingDto>;
 }
 
 pub struct ProtocolRegistry {
     protocols: HashMap<&'static str, Arc<dyn DeviceProtocol>>,
     metadata: HashMap<&'static str, ProtocolMetadata>,
+}
+
+impl Default for ProtocolRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ProtocolRegistry {
@@ -97,5 +117,9 @@ impl ProtocolRegistry {
 
     pub fn list_protocols(&self) -> Vec<&ProtocolMetadata> {
         self.metadata.values().collect()
+    }
+
+    pub fn protocols(&self) -> impl Iterator<Item = &dyn DeviceProtocol> {
+        self.protocols.values().map(|p| p.as_ref())
     }
 }
