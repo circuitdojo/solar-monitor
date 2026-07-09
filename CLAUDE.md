@@ -2,7 +2,7 @@
 
 ## Overview
 
-A Rust workspace producing a single `solar-monitor` binary that polls EG4 solar inverters over RS485 serial (Modbus RTU for the 6000XP, PI30 as legacy), stores readings in SQLite, and serves a REST + WebSocket API with an embedded Preact web UI. It deploys to a Raspberry Pi sitting next to the inverter — see README.md for verified build, cross-compile, and deployment instructions.
+A Rust workspace producing a single `solar-monitor` binary that polls EG4 solar inverters over RS485 serial (Modbus RTU, LuxPower register map), stores readings in SQLite, and serves a REST + WebSocket API with an embedded Preact web UI. It deploys to a Raspberry Pi sitting next to the inverter — see README.md for verified build, cross-compile, and deployment instructions.
 
 ```
 Browser ↔ HTTP/WS (axum, port 8080) ↔ solar-monitor ↔ /dev/ttyUSB0 (RS485) ↔ EG4 inverter
@@ -15,23 +15,23 @@ Browser ↔ HTTP/WS (axum, port 8080) ↔ solar-monitor ↔ /dev/ttyUSB0 (RS485)
 | Crate | Package name | Purpose |
 |---|---|---|
 | `contracts/` | `contracts` | API DTOs (serde camelCase); exports TypeScript bindings via specta (`src/bin/export_types.rs` → `types/ts/index.ts`) |
-| `core/` | `solar-monitor-core` | `DeviceProtocol`/`DeviceConnection` traits, `ProtocolRegistry`, `DeviceConfig`, `ScanConfig` |
-| `protocols/` | `solar-monitor-protocols` | Protocol drivers: `eg4-6000xp-modbus` (tokio-modbus RTU, per-port actor with `set_slave`) and `eg4-pi30-rs485` |
+| `core/` | `solar-monitor-core` | `DeviceProtocol`/`DeviceConnection`/`SettingsAccess` traits, `ProtocolRegistry`, `DeviceConfig`, `ScanConfig` |
+| `protocols/` | `solar-monitor-protocols` | Layered drivers: `transport/modbus_rtu.rs` (per-port actor with `set_slave`), `luxpower/` (protocol family: connection, settings engine), `luxpower/models/` (per-model `ModelDef`: register decode + settings table, e.g. `eg4_6000xp.rs`) |
 | `storage/` | `solar-monitor-storage` | `DataStore` over sqlx/SQLite; schema in `migrations/001_init.sql` |
 | `api/` | `solar-monitor-api` | Axum `Router`, `AppState`, polling tasks, WebSocket broadcast, frontend serving |
 | `bin/` | `solar-monitor` | CLI (clap): `--serve`, `--discover`, `--install`/`--uninstall` (systemd), state composition |
 | `web/` | (npm, not cargo) | Preact + Vite + Tailwind UI; wouter routing; built output in `web/dist/` |
-| `bridge/` | (legacy) | Old WebSocket-to-TCP PI30 bridge; not a workspace member, kept for reference |
+| `bridge/` | (legacy) | Old WebSocket-to-TCP PI30 bridge; not a workspace member, kept for reference (the PI30 protocol driver was removed from `protocols/` entirely) |
 
 Dependency direction: `bin` → `api` → {`protocols`, `storage`} → {`core`, `contracts`}.
 
 ## Key Mechanics
 
 - **API surface**: all routes under `/api/v1/` (health, status, devices CRUD, discovery, test-params, data ranges, dashboard, device settings, `/api/v1/ws` WebSocket). Live `DeviceData` fans out through a `tokio::sync::broadcast` channel in `AppState`.
-- **Inverter settings**: `GET/PUT /api/v1/devices/{id}/settings[/{key}]` backed by the curated table in `protocols/src/eg4_settings.rs` (register, scale, documented range per setting; reads sweep hold regs 0–199 in aligned 40-reg blocks). Writes are range-checked and read back from the inverter; bit settings (`Kind::Bit`/`Kind::BitChoice`, e.g. FuncEn reg 21, generator charge mode reg 120 bit7) use read-modify-write. Extend by adding table entries — never expose raw register writes (the `Eg4Command` raw-write path is deny-all by design).
+- **Inverter settings**: `GET/PUT /api/v1/devices/{id}/settings[/{key}]` is protocol-agnostic — the API resolves `DeviceProtocol::settings(&cfg)` to an optional `SettingsAccess` trait object (`None` ⇒ 400). The LuxPower implementation (`protocols/src/luxpower/settings.rs`) is generic over each model's curated table (`luxpower/models/*.rs`: register, scale, documented range per setting; reads sweep hold regs 0–199 in aligned 40-reg blocks). Writes are range-checked and read back from the inverter; bit settings (`Kind::Bit`/`Kind::BitChoice`, e.g. FuncEn reg 21, generator charge mode reg 120 bit7) use read-modify-write. Extend by adding table entries — never expose raw register writes (the old command endpoint was removed; settings are the only write surface).
 - Generator charge settings (hold regs 194–198) are mode-dependent: SOC pair active when reg 120 bit7 = 1 ("By SOC"), voltage pair when 0 — the inverter ignores the inactive pair. Both are always shown/editable.
-- **Polling**: `solar_monitor_api::start_polling` spawns a task per enabled device; task handles live in `AppState.tasks`. On startup, `bin/src/main.rs` auto-starts polling for persisted enabled devices.
-- **Serial access**: one async mutex / actor per serial port (multiple Modbus unit IDs share one RS485 bus). Default 9600 baud. Discovery probes unit IDs 1–3.
+- **Polling**: `solar_monitor_api::start_polling` spawns a task per enabled device; task handles live in `AppState.tasks`. On startup, `bin/src/main.rs` auto-starts polling for persisted enabled devices; a device whose protocol isn't in the registry (e.g. an old `eg4-pi30-rs485` row) logs a warning, shows as Stopped, and can be edited/removed in the UI — it is never deleted automatically.
+- **Serial access**: one actor per physical serial port keyed by path (multiple Modbus unit IDs share one RS485 bus; each request carries its unit id). Requesting a port that is already open at a different baud is a hard error, not a second actor. Default baud comes from the model (`ModelDef::default_baud`, 19200 for the 6000XP). Discovery iterates every registered protocol; the LuxPower sweep probes unit IDs 1–3 per baud.
 - **Frontend serving**: without features, `ServeDir` from `web/dist` (path resolved via `CARGO_MANIFEST_DIR`, works from any CWD in dev). With `--features solar-monitor-api/embed-frontend`, `rust_embed` compiles `web/dist` into the binary — this is how production builds ship. Build `web/` before the cargo build in that case.
 - **Generated types**: never hand-edit `types/ts/index.ts`; run `cargo run -p contracts --bin export_types`. Contracts use camelCase serde renames — enum values like `DeviceType` are `"solarInverter"` etc.; the frontend must match exactly (they cross the wire).
 
@@ -62,5 +62,5 @@ Cross-compile + deploy: see README.md ("Building for the Raspberry Pi", "Deployi
 
 - Rust edition 2021 across crates; async via tokio throughout; errors via anyhow at binary level, `Result` with typed errors in libraries.
 - DTOs live in `contracts` and are the single source of truth for the wire format; internal domain types live in `core`.
-- New protocols implement `core::DeviceProtocol` and get registered in `protocols::create_registry()`.
+- New LuxPower-map EG4 models (18kPV, 12000XP, …) are a new `ModelDef` in `protocols/src/luxpower/models/` plus one `register_protocol` line in `protocols::create_registry()`. Other vendors implement `core::DeviceProtocol` (and return a `SettingsAccess` from `settings()` if configurable) and get registered the same way; the API layer and web UI are capability-driven and need no changes. Note: LuxPower models are wire-identical during discovery — once a second model exists, discovery needs a model-identifying holding register read.
 - `docs/` contains the original design specs (aspirational, code samples don't match the implementation); treat as intent, not reference.

@@ -1,6 +1,6 @@
 # Solar Monitor
 
-Monitoring service for EG4 solar inverters (6000XP via Modbus RTU, PI30 over RS485). Single Rust binary serving a REST/WebSocket API and an embedded Preact web UI, with SQLite storage. Runs on a Raspberry Pi next to the inverter.
+Monitoring service for EG4 solar inverters (6000XP via Modbus RTU). Single Rust binary serving a REST/WebSocket API and an embedded Preact web UI, with SQLite storage. Runs on a Raspberry Pi next to the inverter.
 
 ## Local Development
 
@@ -112,7 +112,7 @@ The settings table lives in `protocols/src/eg4_settings.rs` — one table entry 
 |---|---|
 | `contracts` | Shared DTOs; exports TypeScript types via specta |
 | `core` | Core engine types (scan config, versioning) |
-| `protocols` | Protocol drivers: EG4 6000XP Modbus RTU, PI30 RS485 |
+| `protocols` | Protocol drivers: Modbus RTU transport + LuxPower-map models (EG4 6000XP) |
 | `storage` | SQLite persistence (sqlx), migrations in `migrations/` |
 | `api` | Axum router, WebSocket, static/embedded frontend serving |
 | `bin` | `solar-monitor` binary: CLI, service install, composition |
