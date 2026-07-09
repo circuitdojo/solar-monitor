@@ -215,6 +215,8 @@ pub enum SettingValueDto {
     Choice {
         value: u16,
         options: Vec<u16>,
+        /// Optional display labels, parallel to `options`
+        labels: Option<Vec<String>>,
         unit: Option<String>,
     },
     /// Times as "HH:MM"

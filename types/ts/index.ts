@@ -32,7 +32,7 @@ export type DeviceCommandRequest = { protocol: "eg4-6000xp-modbus"; command: Eg4
 
 export type DeviceCommandResponseDto = { ok: boolean; message: string | null }
 
-export type SettingValueDto = { kind: "number"; value: number; min: number; max: number; step: number; unit: string | null } | { kind: "toggle"; enabled: boolean } | { kind: "choice"; value: number; options: number[]; unit: string | null } | { kind: "timeWindow"; start: string; end: string }
+export type SettingValueDto = { kind: "number"; value: number; min: number; max: number; step: number; unit: string | null } | { kind: "toggle"; enabled: boolean } | { kind: "choice"; value: number; options: number[]; labels: string[] | null; unit: string | null } | { kind: "timeWindow"; start: string; end: string }
 
 export type DeviceSettingDto = { key: string; label: string; group: string; setting: SettingValueDto }
 

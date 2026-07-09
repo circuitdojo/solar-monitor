@@ -22,8 +22,14 @@ enum Kind {
         step: f64,
         unit: &'static str,
     },
-    /// Single bit of the FuncEn register (read-modify-write).
-    FuncBit { bit: u8 },
+    /// Single bit of a bit-field register (read-modify-write), shown as a toggle.
+    Bit { reg: u16, bit: u8 },
+    /// Single bit of a bit-field register, shown as a labeled 0/1 choice.
+    BitChoice {
+        reg: u16,
+        bit: u8,
+        labels: [&'static str; 2],
+    },
     /// Register restricted to an enumerated set of raw values.
     Choice {
         reg: u16,
@@ -87,7 +93,10 @@ const SETTINGS: &[Def] = &[
         key: "ac_charge_enabled",
         label: "AC charge (from grid)",
         group: "AC charge",
-        kind: Kind::FuncBit { bit: 7 },
+        kind: Kind::Bit {
+            reg: FUNC_EN_REG,
+            bit: 7,
+        },
     },
     Def {
         key: "ac_charge_power_percent",
@@ -186,6 +195,82 @@ const SETTINGS: &[Def] = &[
             unit: "V",
         },
     },
+    // Generator charging (registers valid on units with a generator on the GEN/AC input)
+    Def {
+        key: "gen_charge_type",
+        label: "Generator charge control",
+        group: "Generator",
+        kind: Kind::BitChoice {
+            reg: 120,
+            bit: 7,
+            labels: ["By voltage", "By SOC"],
+        },
+    },
+    Def {
+        key: "gen_charge_start_soc",
+        label: "Generator charge start SOC",
+        group: "Generator",
+        kind: Kind::Number {
+            reg: 196,
+            scale: 1.0,
+            min: 0.0,
+            max: 90.0,
+            step: 1.0,
+            unit: "%",
+        },
+    },
+    Def {
+        key: "gen_charge_end_soc",
+        label: "Generator charge end SOC",
+        group: "Generator",
+        kind: Kind::Number {
+            reg: 197,
+            scale: 1.0,
+            min: 20.0,
+            max: 100.0,
+            step: 1.0,
+            unit: "%",
+        },
+    },
+    Def {
+        key: "gen_charge_start_voltage",
+        label: "Generator charge start voltage",
+        group: "Generator",
+        kind: Kind::Number {
+            reg: 194,
+            scale: 0.1,
+            min: 38.4,
+            max: 52.0,
+            step: 0.1,
+            unit: "V",
+        },
+    },
+    Def {
+        key: "gen_charge_end_voltage",
+        label: "Generator charge end voltage",
+        group: "Generator",
+        kind: Kind::Number {
+            reg: 195,
+            scale: 0.1,
+            min: 48.0,
+            max: 59.0,
+            step: 0.1,
+            unit: "V",
+        },
+    },
+    Def {
+        key: "gen_charge_current",
+        label: "Generator charge current limit",
+        group: "Generator",
+        kind: Kind::Number {
+            reg: 198,
+            scale: 1.0,
+            min: 0.0,
+            max: 60.0,
+            step: 1.0,
+            unit: "A",
+        },
+    },
     // Backup output
     Def {
         key: "eps_voltage",
@@ -272,12 +357,19 @@ fn dto(def: &Def, regs: &dyn Fn(u16) -> u16) -> contracts::DeviceSettingDto {
             step: *step,
             unit: Some(unit.to_string()),
         },
-        Kind::FuncBit { bit } => contracts::SettingValueDto::Toggle {
-            enabled: regs(FUNC_EN_REG) & (1 << bit) != 0,
+        Kind::Bit { reg, bit } => contracts::SettingValueDto::Toggle {
+            enabled: regs(*reg) & (1 << bit) != 0,
+        },
+        Kind::BitChoice { reg, bit, labels } => contracts::SettingValueDto::Choice {
+            value: (regs(*reg) >> bit) & 1,
+            options: vec![0, 1],
+            labels: Some(labels.iter().map(|s| s.to_string()).collect()),
+            unit: None,
         },
         Kind::Choice { reg, options, unit } => contracts::SettingValueDto::Choice {
             value: regs(*reg),
             options: options.to_vec(),
+            labels: None,
             unit: Some(unit.to_string()),
         },
         Kind::TimeWindow { start_reg, end_reg } => contracts::SettingValueDto::TimeWindow {
@@ -293,30 +385,24 @@ fn dto(def: &Def, regs: &dyn Fn(u16) -> u16) -> contracts::DeviceSettingDto {
     }
 }
 
-/// Read all curated settings (three aligned 40-register holding blocks).
+/// Read all curated settings (five aligned 40-register holding blocks, regs 0-199).
 pub async fn eg4_6000xp_read_settings(
     cfg: &core::DeviceConfig,
 ) -> Result<Vec<contracts::DeviceSettingDto>> {
     let conn = open(cfg).await?;
-    let b0 = conn
-        .handle
-        .read_holding_registers(conn.unit_id, 0, 40)
-        .await?;
-    let b1 = conn
-        .handle
-        .read_holding_registers(conn.unit_id, 40, 40)
-        .await?;
-    let b2 = conn
-        .handle
-        .read_holding_registers(conn.unit_id, 80, 40)
-        .await?;
+    let mut blocks: Vec<Vec<u16>> = Vec::with_capacity(5);
+    for start in [0u16, 40, 80, 120, 160] {
+        blocks.push(
+            conn.handle
+                .read_holding_registers(conn.unit_id, start, 40)
+                .await?,
+        );
+    }
     let regs = move |addr: u16| -> u16 {
-        match addr {
-            0..=39 => b0[addr as usize],
-            40..=79 => b1[(addr - 40) as usize],
-            80..=119 => b2[(addr - 80) as usize],
-            _ => 0,
-        }
+        blocks
+            .get((addr / 40) as usize)
+            .map(|b| b[(addr % 40) as usize])
+            .unwrap_or(0)
     };
     Ok(SETTINGS.iter().map(|d| dto(d, &regs)).collect())
 }
@@ -353,14 +439,17 @@ pub async fn eg4_6000xp_write_setting(
                 .write_single_register(conn.unit_id, *reg, raw)
                 .await?;
         }
-        Kind::FuncBit { bit } => {
-            let on: bool = value
-                .trim()
-                .parse()
-                .map_err(|_| anyhow!("expected true/false"))?;
+        Kind::Bit { reg, bit } | Kind::BitChoice { reg, bit, .. } => {
+            let on: bool = match value.trim() {
+                "0" => false,
+                "1" => true,
+                other => other
+                    .parse()
+                    .map_err(|_| anyhow!("expected true/false or 0/1"))?,
+            };
             let cur = conn
                 .handle
-                .read_holding_registers(conn.unit_id, FUNC_EN_REG, 1)
+                .read_holding_registers(conn.unit_id, *reg, 1)
                 .await?[0];
             let new = if on {
                 cur | (1 << bit)
@@ -369,7 +458,7 @@ pub async fn eg4_6000xp_write_setting(
             };
             if new != cur {
                 conn.handle
-                    .write_single_register(conn.unit_id, FUNC_EN_REG, new)
+                    .write_single_register(conn.unit_id, *reg, new)
                     .await?;
             }
         }
@@ -403,8 +492,10 @@ pub async fn eg4_6000xp_write_setting(
     // Read back the affected registers and return what the inverter actually stored
     let mut vals: std::collections::HashMap<u16, u16> = std::collections::HashMap::new();
     let addrs: Vec<u16> = match &def.kind {
-        Kind::Number { reg, .. } | Kind::Choice { reg, .. } => vec![*reg],
-        Kind::FuncBit { .. } => vec![FUNC_EN_REG],
+        Kind::Number { reg, .. }
+        | Kind::Choice { reg, .. }
+        | Kind::Bit { reg, .. }
+        | Kind::BitChoice { reg, .. } => vec![*reg],
         Kind::TimeWindow { start_reg, end_reg } => vec![*start_reg, *end_reg],
     };
     for a in addrs {

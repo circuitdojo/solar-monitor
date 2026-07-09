@@ -71,7 +71,9 @@ function SettingRow({ deviceId, s, onStored }: {
             value={st.draft}
             onChange={(e: any) => setSt(p => ({ ...p, draft: e.target.value }))}
           >
-            {v.options.map(o => <option value={String(o)}>{o}{v.unit ? ` ${v.unit}` : ''}</option>)}
+            {v.options.map((o, i) => (
+              <option value={String(o)}>{v.labels?.[i] ?? `${o}${v.unit ? ` ${v.unit}` : ''}`}</option>
+            ))}
           </select>
         )}
         {v.kind === 'timeWindow' && (
