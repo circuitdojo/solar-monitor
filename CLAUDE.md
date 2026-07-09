@@ -1,222 +1,61 @@
-# EG4 Monitor - Codebase Architecture
+# EG4 Monitor (Solar Monitor) - Codebase Architecture
 
 ## Overview
 
-EG4 Monitor is a Rust-based system for communicating with EG4 solar inverters using the PI30 protocol. The project implements a WebSocket-to-TCP bridge architecture that enables web browsers to communicate with EG4 devices over TCP/IP networks.
-
-## High-Level Architecture
-
-The system follows a three-tier architecture:
+A Rust workspace producing a single `solar-monitor` binary that polls EG4 solar inverters over RS485 serial (Modbus RTU for the 6000XP, PI30 as legacy), stores readings in SQLite, and serves a REST + WebSocket API with an embedded Preact web UI. It deploys to a Raspberry Pi sitting next to the inverter — see README.md for verified build, cross-compile, and deployment instructions.
 
 ```
-Web Browser (WASM Client) ↔ WebSocket ↔ Bridge Server ↔ TCP ↔ EG4 Inverter
+Browser ↔ HTTP/WS (axum, port 8080) ↔ solar-monitor ↔ /dev/ttyUSB0 (RS485) ↔ EG4 inverter
+                                          ↕
+                                    SQLite (sqlx)
 ```
 
-### Core Components
+## Workspace Layout
 
-1. **Bridge Server** (`bridge/`) - Rust TCP server that acts as a WebSocket-to-TCP gateway
-2. **WASM Client** (`wasm-client/`) - WebAssembly library for browser-based communication
-3. **Workspace Root** - Cargo workspace configuration managing shared dependencies
+| Crate | Package name | Purpose |
+|---|---|---|
+| `contracts/` | `contracts` | API DTOs (serde camelCase); exports TypeScript bindings via specta (`src/bin/export_types.rs` → `types/ts/index.ts`) |
+| `core/` | `solar-monitor-core` | `DeviceProtocol`/`DeviceConnection` traits, `ProtocolRegistry`, `DeviceConfig`, `ScanConfig` |
+| `protocols/` | `solar-monitor-protocols` | Protocol drivers: `eg4-6000xp-modbus` (tokio-modbus RTU, per-port actor with `set_slave`) and `eg4-pi30-rs485` |
+| `storage/` | `solar-monitor-storage` | `DataStore` over sqlx/SQLite; schema in `migrations/001_init.sql` |
+| `api/` | `solar-monitor-api` | Axum `Router`, `AppState`, polling tasks, WebSocket broadcast, frontend serving |
+| `bin/` | `solar-monitor` | CLI (clap): `--serve`, `--discover`, `--install`/`--uninstall` (systemd), state composition |
+| `web/` | (npm, not cargo) | Preact + Vite + Tailwind UI; wouter routing; built output in `web/dist/` |
+| `bridge/` | (legacy) | Old WebSocket-to-TCP PI30 bridge; not a workspace member, kept for reference |
 
-## Technology Stack
+Dependency direction: `bin` → `api` → {`protocols`, `storage`} → {`core`, `contracts`}.
 
-### Core Technologies
-- **Language**: Rust (Edition 2024)
-- **Async Runtime**: Tokio for asynchronous networking
-- **WebSocket**: tokio-tungstenite for WebSocket server implementation
-- **WebAssembly**: wasm-bindgen for browser integration
-- **Serialization**: serde with JSON for message formatting
+## Key Mechanics
 
-### Key Dependencies
-- **Networking**: tokio, tokio-tungstenite, futures-util
-- **CLI**: clap for command-line argument parsing
-- **Logging**: tracing, tracing-subscriber for structured logging
-- **Error Handling**: anyhow for error management
-- **WebAssembly**: wasm-bindgen, web-sys, js-sys
-- **Utilities**: hex for hexadecimal encoding, serde_json for JSON processing
+- **API surface**: all routes under `/api/v1/` (health, status, devices CRUD, discovery, test-params, data ranges, dashboard, `/api/v1/ws` WebSocket). Live `DeviceData` fans out through a `tokio::sync::broadcast` channel in `AppState`.
+- **Polling**: `solar_monitor_api::start_polling` spawns a task per enabled device; task handles live in `AppState.tasks`. On startup, `bin/src/main.rs` auto-starts polling for persisted enabled devices.
+- **Serial access**: one async mutex / actor per serial port (multiple Modbus unit IDs share one RS485 bus). Default 9600 baud. Discovery probes unit IDs 1–3.
+- **Frontend serving**: without features, `ServeDir` from `web/dist` (path resolved via `CARGO_MANIFEST_DIR`, works from any CWD in dev). With `--features solar-monitor-api/embed-frontend`, `rust_embed` compiles `web/dist` into the binary — this is how production builds ship. Build `web/` before the cargo build in that case.
+- **Generated types**: never hand-edit `types/ts/index.ts`; run `cargo run -p contracts --bin export_types`. Contracts use camelCase serde renames — enum values like `DeviceType` are `"solarInverter"` etc.; the frontend must match exactly (they cross the wire).
 
-## Project Structure
+## Gotchas (hard-won)
 
-```
-eg4-monitor/
-├── Cargo.toml                 # Workspace configuration
-├── bridge/                    # WebSocket-to-TCP bridge server
-│   ├── Cargo.toml            # Bridge dependencies
-│   ├── README.md             # Bridge documentation
-│   ├── src/main.rs           # Bridge implementation (~270 lines)
-│   └── test_connection.py    # Python test client
-└── wasm-client/              # WebAssembly client library
-    ├── Cargo.toml            # WASM dependencies
-    └── src/lib.rs            # WASM client implementation (~190 lines)
-```
+- The 6000XP's Modbus RTU interface is the **dongle port** (4-pin, black/white = A/B): 19200 baud 8N1, unit 1, FC 0x04 input registers, LuxPower register map. The **battery comms port** instead reaches an EG4-LL BMS: 9600 baud, FC 0x03 only, responses truncated at ~12 bytes — do not confuse the two buses.
 
-## Protocol Implementation
-
-### PI30 Protocol
-The system implements the PI30 protocol for EG4 inverter communication:
-- **CRC Calculation**: Custom CRC-16 implementation for message integrity
-- **Command Format**: `<command><CRC><CR>` structure
-- **Supported Commands**: QID, Q1, QPIRI, QPIWS, QPGS0, QBMS
-- **Default Connection**: 192.168.10.7:8000 (configurable)
-
-### Message Format
-JSON-based message structure for WebSocket communication:
-```json
-{
-  "type": "command|response|error|connected",
-  "command": "PI30_COMMAND",
-  "response": "device_response",
-  "error": "error_message"
-}
-```
-
-## Key Architectural Patterns
-
-### 1. Workspace Organization
-- Cargo workspace with shared dependency management
-- Centralized version and metadata configuration
-- Cross-component dependency sharing
-
-### 2. Async/Await Architecture
-- Tokio-based async runtime throughout
-- Non-blocking I/O for all network operations
-- Concurrent connection handling
-
-### 3. Bridge Pattern
-- Clean separation between WebSocket and TCP protocols
-- Protocol translation and message forwarding
-- Error propagation across protocol boundaries
-
-### 4. WebAssembly Integration
-- Browser-compatible WASM module
-- JavaScript interop through wasm-bindgen
-- Client-side WebSocket management
-
-### 5. Error Handling Strategy
-- anyhow for error propagation
-- Structured logging with tracing
-- Graceful connection failure handling
+- `serialport` is depended on with `default-features = false` in `api/` and `bin/` to avoid libudev, which breaks aarch64 cross-compilation. Do not re-enable default features. Port enumeration works via sysfs regardless.
+- The production Pi login is `pi@solar-pi.local` (key-only; `pi@`/`root@` are rejected).
+- The systemd unit uses `ProtectHome=true`; the binary must live outside `/home` (installed at `/usr/local/bin/solar-monitor`).
+- Something else already listens on port 8080 on the dev machine — use another port (e.g. 8090) for local `--serve`.
 
 ## Development Commands
 
-### Build Commands
-```bash
-# Build entire workspace
-cargo build
-
-# Build release version
-cargo build --release
-
-# Build specific component
-cargo build -p eg4-bridge
-cargo build -p eg4-wasm-client
-
-# Build WASM client for web
-cd wasm-client
-wasm-pack build --target web
+```sh
+cd web && npm run build            # required before serving locally
+cargo run -p solar-monitor -- --serve --port 8090
+cargo test --workspace
+cargo fmt && cargo clippy --workspace --all-features   # before every commit
 ```
 
-### Testing Commands
-```bash
-# Run Rust tests
-cargo test
+Cross-compile + deploy: see README.md ("Building for the Raspberry Pi", "Deploying").
 
-# Test bridge connectivity
-cd bridge
-cargo run -- --test --eg4-host 192.168.10.7:8000
+## Conventions
 
-# Python integration test
-cd bridge
-pip install websockets
-python test_connection.py
-```
-
-### Development Server
-```bash
-# Start bridge server (default: localhost:8080)
-cd bridge
-cargo run
-
-# Custom configuration
-cargo run -- --eg4-host 192.168.1.100:8000 --bind 0.0.0.0:9090
-```
-
-### Linting and Formatting
-```bash
-# Format code
-cargo fmt
-
-# Run clippy lints
-cargo clippy
-
-# Check without building
-cargo check
-```
-
-## Configuration and Deployment
-
-### Bridge Configuration
-- **EG4 Host**: Configurable via `--eg4-host` (default: 192.168.10.7:8000)
-- **WebSocket Bind**: Configurable via `--bind` (default: 127.0.0.1:8080)
-- **Test Mode**: `--test` flag for connection validation
-
-### WASM Client Configuration
-- **Bridge URL**: Configurable WebSocket endpoint (default: ws://localhost:8080)
-- **Browser Integration**: Direct instantiation in web applications
-
-## Testing Approach
-
-### Unit Testing
-- Rust unit tests for protocol implementation
-- CRC calculation verification
-- Message serialization/deserialization
-
-### Integration Testing
-- Python WebSocket client for end-to-end testing
-- Connection stability testing
-- Command response validation
-
-### Manual Testing
-- Built-in connection test mode in bridge
-- Command-line test utilities
-- Browser console integration
-
-## Key Conventions
-
-### Code Style
-- Rust 2024 edition features
-- Async/await throughout for I/O operations
-- Structured error handling with anyhow
-- Comprehensive logging with tracing
-
-### Naming Conventions
-- Snake_case for Rust identifiers
-- PascalCase for types and structs
-- Descriptive function names reflecting PI30 protocol
-
-### Dependencies Management
-- Workspace-level dependency sharing
-- Feature flags for conditional compilation
-- Minimal dependency footprint
-
-### Error Handling
-- Result<T, E> pattern throughout
-- Context-rich error messages
-- Graceful degradation for network failures
-
-## Architecture Strengths
-
-1. **Separation of Concerns**: Clean separation between bridge, protocol, and client
-2. **Protocol Abstraction**: PI30 protocol encapsulated in dedicated struct
-3. **Async Performance**: Non-blocking I/O throughout the stack
-4. **Web Compatibility**: WASM enables browser-based monitoring
-5. **Extensibility**: Command pattern allows easy protocol extension
-6. **Testing**: Comprehensive test utilities for validation
-
-## Development Considerations
-
-- **Network Dependencies**: Requires reliable network connectivity to EG4 devices
-- **Protocol Limitations**: Some EG4 models may not support all PI30 commands
-- **WebAssembly Constraints**: Browser security restrictions on network access
-- **Concurrent Connections**: Single TCP connection per bridge instance
-- **Error Recovery**: Manual reconnection required for dropped connections
+- Rust edition 2021 across crates; async via tokio throughout; errors via anyhow at binary level, `Result` with typed errors in libraries.
+- DTOs live in `contracts` and are the single source of truth for the wire format; internal domain types live in `core`.
+- New protocols implement `core::DeviceProtocol` and get registered in `protocols::create_registry()`.
+- `docs/` contains the original design specs (aspirational, code samples don't match the implementation); treat as intent, not reference.
