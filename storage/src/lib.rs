@@ -29,6 +29,7 @@ impl DataStore {
             // Best-effort: pre-create the SQLite file to avoid implicit creation issues.
             let _ = std::fs::OpenOptions::new()
                 .create(true)
+                .truncate(false)
                 .write(false)
                 .open(database_path);
             (format!("sqlite://{}?mode=rwc", database_path), 5u32)
