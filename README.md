@@ -80,8 +80,29 @@ Discovery probes Modbus RTU unit IDs 1–3 at 19200 then 9600 baud. Devices can 
 
 Wiring notes (learned the hard way):
 
-- The 6000XP's Modbus RTU interface is the **dongle port** (4-pin connector where the EG4 WiFi dongle plugs in; black/white wires are A/B) at **19200 baud 8N1, unit ID 1**. It serves the LuxPower register map via function 0x04 (read input registers). See [jsharkey/lxp-esphome](https://github.com/jsharkey/lxp-esphome) for a community register reference.
+- The 6000XP's Modbus RTU interface is the **dongle port** (4-pin connector where the EG4 WiFi dongle plugs in; black/white wires are A/B) at **19200 baud 8N1, unit ID 1**. It speaks plain standard Modbus RTU (functions 0x03/0x04/0x06/0x10) over the LuxPower register map — the SN-framed little-endian dialect described in the official LuxPower PDF does not appear on the wire. See [jsharkey/lxp-esphome](https://github.com/jsharkey/lxp-esphome) for a community register reference.
 - The **battery comms port** is a different bus: an EG4-LL/LifePower4 BMS answers there at 9600 baud, function 0x03 only, and truncates any response longer than ~12 bytes. Plugging the adapter into that port will never reach the inverter.
+- A **defective USB-RS485 adapter** produces exactly the same symptom as wrong wiring or wrong protocol: total silence. A week was lost to one. If wiring, baud, and unit ID check out and the bus stays dead on two different computers, swap the adapter before doubting anything else.
+- The service's per-port actor holds the serial device open. If the USB adapter is replugged, restart the service (`systemctl restart solar-monitor`) — the cached file descriptor points at the old device and every read fails silently.
+
+## Web UI
+
+- **Dashboard** (`/`) — live view: stat tiles for load/solar/battery/grid with sparklines, last-hour power chart, battery SOC chart, energy-today bars, power flow, temperatures. Prefills an hour of history, then streams over the WebSocket. A generator area appears automatically when the inverter's AC input type is set to Generator.
+- **Devices** (`/devices`) — device list, add/remove, polling status.
+- **Settings** (`/settings`) — inverter configuration read from and written to the holding registers (see below).
+
+## Inverter Configuration
+
+`/settings` exposes a curated set of EG4 6000XP settings (charge/discharge power and current limits, charge voltage, AC-charge enable/power/SOC limit/time windows, discharge cut-off SOC and voltage, backup output voltage/frequency). Every value shown is read from the inverter; every write is range-checked against the official LuxPower hold-register limits, written with function 0x06, then read back — the UI shows what the inverter actually stored.
+
+API:
+
+```
+GET /api/v1/devices/{id}/settings          # read all settings
+PUT /api/v1/devices/{id}/settings/{key}    # body {"value": "..."} — number, "true"/"false", or "HH:MM-HH:MM"
+```
+
+The settings table lives in `protocols/src/eg4_settings.rs` — one table entry per setting (register, scale, documented range). Add new settings there; do not open raw register writes to the UI. The inverter standby/power-on bit is deliberately not exposed.
 
 ## Workspace Layout
 

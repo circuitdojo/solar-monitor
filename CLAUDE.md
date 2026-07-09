@@ -27,7 +27,8 @@ Dependency direction: `bin` → `api` → {`protocols`, `storage`} → {`core`, 
 
 ## Key Mechanics
 
-- **API surface**: all routes under `/api/v1/` (health, status, devices CRUD, discovery, test-params, data ranges, dashboard, `/api/v1/ws` WebSocket). Live `DeviceData` fans out through a `tokio::sync::broadcast` channel in `AppState`.
+- **API surface**: all routes under `/api/v1/` (health, status, devices CRUD, discovery, test-params, data ranges, dashboard, device settings, `/api/v1/ws` WebSocket). Live `DeviceData` fans out through a `tokio::sync::broadcast` channel in `AppState`.
+- **Inverter settings**: `GET/PUT /api/v1/devices/{id}/settings[/{key}]` backed by the curated table in `protocols/src/eg4_settings.rs` (register, scale, documented range per setting). Writes are range-checked and read back from the inverter; FuncEn bits (hold reg 21) use read-modify-write. Extend by adding table entries — never expose raw register writes (the `Eg4Command` raw-write path is deny-all by design).
 - **Polling**: `solar_monitor_api::start_polling` spawns a task per enabled device; task handles live in `AppState.tasks`. On startup, `bin/src/main.rs` auto-starts polling for persisted enabled devices.
 - **Serial access**: one async mutex / actor per serial port (multiple Modbus unit IDs share one RS485 bus). Default 9600 baud. Discovery probes unit IDs 1–3.
 - **Frontend serving**: without features, `ServeDir` from `web/dist` (path resolved via `CARGO_MANIFEST_DIR`, works from any CWD in dev). With `--features solar-monitor-api/embed-frontend`, `rust_embed` compiles `web/dist` into the binary — this is how production builds ship. Build `web/` before the cargo build in that case.
@@ -35,7 +36,10 @@ Dependency direction: `bin` → `api` → {`protocols`, `storage`} → {`core`, 
 
 ## Gotchas (hard-won)
 
-- The 6000XP's Modbus RTU interface is the **dongle port** (4-pin, black/white = A/B): 19200 baud 8N1, unit 1, FC 0x04 input registers, LuxPower register map. The **battery comms port** instead reaches an EG4-LL BMS: 9600 baud, FC 0x03 only, responses truncated at ~12 bytes — do not confuse the two buses.
+- The 6000XP's Modbus RTU interface is the **dongle port** (4-pin, black/white = A/B): 19200 baud 8N1, unit 1, **plain standard Modbus RTU** (the SN-framed LE dialect in the official PDF never appears on the wire), LuxPower register map. The **battery comms port** instead reaches an EG4-LL BMS: 9600 baud, FC 0x03 only, responses truncated at ~12 bytes — do not confuse the two buses.
+- The PDF has **two register tables**: input (FC4, live data) and holding (FC3, config) — the same number means different things in each. `ACInputType` is *input* reg 77 bit0; holding 77 is a charge-priority hour. Generator input regs (121–126) hold junk unless the AC input type is Generator — gate on the bit, never on plausibility.
+- The per-port actor caches its serial fd forever; after a USB replug the service must be restarted or every read fails silently. A **defective USB-RS485 adapter** is indistinguishable from wrong wiring — if two computers see a dead bus, swap the adapter.
+- Time-window registers pack hour in the **low byte**, minute in the high byte. Input reg 5 packs SOC (low) | SOH (high).
 
 - `serialport` is depended on with `default-features = false` in `api/` and `bin/` to avoid libudev, which breaks aarch64 cross-compilation. Do not re-enable default features. Port enumeration works via sysfs regardless.
 - The production Pi login is `pi@solar-pi.local` (key-only; `pi@`/`root@` are rejected).
