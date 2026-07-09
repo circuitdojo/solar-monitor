@@ -363,6 +363,12 @@ function FlowStrip({ s }: { s: Sample }) {
         'Battery',
         battW == null ? '—' : Math.abs(battW) < 15 ? 'idle' : battW > 0 ? `charging ${fmtW(battW)}` : `discharging ${fmtW(-battW)}`,
       )}
+      {s.custom['ac_input_is_generator'] === 1 && (
+        <>
+          <span style={{ color: 'var(--vz-ink-3)' }}>·</span>
+          {node('var(--vz-gen)', 'Generator', (s.custom['gen_power'] ?? 0) > 0 ? fmtW(s.custom['gen_power']) : 'off')}
+        </>
+      )}
     </div>
   )
 }
@@ -394,6 +400,7 @@ export function DashboardPage() {
         { label: 'Discharged', kwh: c['discharge_day_kwh'] ?? 0 },
         { label: 'Imported', kwh: c['import_day_kwh'] ?? 0 },
         { label: 'Exported', kwh: c['export_day_kwh'] ?? 0 },
+        ...(c['ac_input_is_generator'] === 1 ? [{ label: 'Generator', kwh: c['gen_day_kwh'] ?? 0 }] : []),
       ]
     : []
 
@@ -493,6 +500,26 @@ export function DashboardPage() {
             <Card title="Power flow">
               {latest ? <FlowStrip s={latest} /> : <div style={{ color: 'var(--vz-ink-3)' }}>Waiting for data…</div>}
             </Card>
+            {c['ac_input_is_generator'] === 1 && <Card title="Generator">
+              {latest ? (
+                <div class="flex flex-wrap gap-x-8 gap-y-2 text-sm">
+                  {[
+                    ['Power', fmtW(c['gen_power'] ?? 0)],
+                    ['Voltage', fmtV(c['gen_voltage'] ?? 0)],
+                    ['Frequency', c['gen_frequency'] ? `${c['gen_frequency'].toFixed(2)} Hz` : '—'],
+                    ['Today', `${(c['gen_day_kwh'] ?? 0).toFixed(1)} kWh`],
+                    ['Total', `${(c['gen_total_kwh'] ?? 0).toFixed(1)} kWh`],
+                  ].map(([label, v]) => (
+                    <div>
+                      <div style={{ color: 'var(--vz-ink-2)' }}>{label}</div>
+                      <div class="text-xl font-semibold" style={{ color: 'var(--vz-ink)' }}>{v}</div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ color: 'var(--vz-ink-3)' }}>Waiting for data…</div>
+              )}
+            </Card>}
             <Card title="Temperatures">
               {latest ? (
                 <div class="flex flex-wrap gap-x-8 gap-y-2 text-sm">

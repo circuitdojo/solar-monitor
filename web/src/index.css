@@ -5,6 +5,30 @@
 html, body, #app { height: 100%; }
 body { background: var(--vz-page); color: var(--vz-ink); }
 
+.vz-card {
+  background: var(--vz-surface);
+  border: 1px solid var(--vz-border);
+  border-radius: 0.5rem;
+}
+.vz-input {
+  width: 100%;
+  background: var(--vz-page);
+  color: var(--vz-ink);
+  border: 1px solid var(--vz-border);
+  border-radius: 0.375rem;
+  padding: 0.375rem 0.5rem;
+}
+.vz-input:focus { outline: 2px solid var(--vz-load); outline-offset: -1px; }
+.vz-btn {
+  border-radius: 0.375rem;
+  padding: 0.375rem 0.75rem;
+  font-size: 0.875rem;
+}
+.vz-btn-primary { background: var(--vz-load); color: #fff; }
+.vz-btn-primary:disabled { opacity: 0.5; }
+.vz-btn-ghost { color: var(--vz-ink-2); border: 1px solid var(--vz-border); }
+.vz-btn-danger { color: var(--vz-crit); border: 1px solid var(--vz-border); }
+
 :root {
   --vz-page: #f9f9f7;
   --vz-surface: #fcfcfb;
@@ -18,6 +42,7 @@ body { background: var(--vz-page); color: var(--vz-ink); }
   --vz-batt: #1baf7a;    /* slot 2 */
   --vz-pv: #eda100;      /* slot 3 */
   --vz-grid-s: #4a3aa7;  /* slot 5 */
+  --vz-gen: #eb6834;     /* slot 8 */
   --vz-seq: #2a78d6;
   --vz-batt-track: #d2efe4;
   --vz-good: #0ca30c;
@@ -39,6 +64,7 @@ body { background: var(--vz-page); color: var(--vz-ink); }
     --vz-batt: #199e70;
     --vz-pv: #c98500;
     --vz-grid-s: #9085e9;
+    --vz-gen: #d95926;
     --vz-seq: #3987e5;
     --vz-batt-track: #1e3a2f;
     --vz-good: #0ca30c;

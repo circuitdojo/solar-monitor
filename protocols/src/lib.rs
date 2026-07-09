@@ -236,6 +236,12 @@ enum PortRequest {
         qty: u16,
         resp: tokio::sync::oneshot::Sender<anyhow::Result<Vec<u16>>>,
     },
+    ReadHolding {
+        unit_id: u8,
+        addr: u16,
+        qty: u16,
+        resp: tokio::sync::oneshot::Sender<anyhow::Result<Vec<u16>>>,
+    },
     WriteSingleRegister {
         unit_id: u8,
         addr: u16,
@@ -267,6 +273,21 @@ impl PortHandle {
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.tx
             .send(PortRequest::ReadInput {
+                unit_id,
+                addr,
+                qty,
+                resp: tx,
+            })
+            .await
+            .map_err(|_| anyhow::anyhow!("port actor unavailable"))?;
+        rx.await
+            .map_err(|_| anyhow::anyhow!("port actor dropped"))?
+    }
+
+    async fn read_holding_registers(&self, unit_id: u8, addr: u16, qty: u16) -> Result<Vec<u16>> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.tx
+            .send(PortRequest::ReadHolding {
                 unit_id,
                 addr,
                 qty,
@@ -424,6 +445,25 @@ async fn run_port_actor(
                     };
                     let _ = resp.send(res);
                 }
+                PortRequest::ReadHolding {
+                    unit_id,
+                    addr,
+                    qty,
+                    resp,
+                } => {
+                    ctx.set_slave(Slave(unit_id));
+                    let res = match timeout(
+                        Duration::from_secs(timeout_secs),
+                        ctx.read_holding_registers(addr, qty),
+                    )
+                    .await
+                    {
+                        Ok(Ok(regs)) => regs.map_err(|e| anyhow::anyhow!(e)),
+                        Ok(Err(e)) => Err(anyhow::anyhow!(e)),
+                        Err(_) => Err(anyhow::anyhow!("timeout")),
+                    };
+                    let _ = resp.send(res);
+                }
                 PortRequest::WriteSingleRegister {
                     unit_id,
                     addr,
@@ -567,6 +607,14 @@ impl DeviceConnection for Eg4ModbusConn {
         let b3 = self.read_input_registers(80, 40).await?;
         let b4 = self.read_input_registers(120, 40).await?;
         let b5 = self.read_input_registers(160, 40).await?;
+        // Holding reg 77 bit0 = ACInputType: 0 grid, 1 generator. The gen input
+        // registers (121-126) hold junk unless a generator is configured.
+        let ac_input_is_gen = self
+            .handle
+            .read_holding_registers(self.unit_id, 77, 1)
+            .await
+            .map(|r| r.first().map(|v| v & 1 == 1).unwrap_or(false))
+            .unwrap_or(false);
 
         let u16le = |s: &[u8]| -> u16 { u16::from_le_bytes([s[0], s[1]]) };
         let i16le = |s: &[u8]| -> i16 { i16::from_le_bytes([s[0], s[1]]) };
@@ -660,6 +708,9 @@ impl DeviceConnection for Eg4ModbusConn {
         let gen_v = u16le(&b4[2..4]) as f64 / 10.0;
         let gen_f = u16le(&b4[4..6]) as f64 / 100.0;
         let gen_p = u16le(&b4[6..8]) as f64;
+        let egen_day = u16le(&b4[8..10]) as f64 / 10.0;
+        let egen_all =
+            (u16le(&b4[10..12]) as u32 | ((u16le(&b4[12..14]) as u32) << 16)) as f64 / 10.0;
         let eps_v_l1n = u16le(&b4[14..16]) as f64 / 10.0;
         let eps_v_l2n = u16le(&b4[16..18]) as f64 / 10.0;
         let peps_l1n = u16le(&b4[18..20]) as f64;
@@ -814,9 +865,21 @@ impl DeviceConnection for Eg4ModbusConn {
             .custom_metrics
             .insert("bms_cycles".into(), cycles_bms);
         metrics.custom_metrics.insert("battery_soh".into(), soh);
-        metrics.custom_metrics.insert("gen_voltage".into(), gen_v);
-        metrics.custom_metrics.insert("gen_frequency".into(), gen_f);
-        metrics.custom_metrics.insert("gen_power".into(), gen_p);
+        metrics.custom_metrics.insert(
+            "ac_input_is_generator".into(),
+            if ac_input_is_gen { 1.0 } else { 0.0 },
+        );
+        if ac_input_is_gen {
+            metrics.custom_metrics.insert("gen_voltage".into(), gen_v);
+            metrics.custom_metrics.insert("gen_frequency".into(), gen_f);
+            metrics.custom_metrics.insert("gen_power".into(), gen_p);
+            metrics
+                .custom_metrics
+                .insert("gen_day_kwh".into(), egen_day);
+            metrics
+                .custom_metrics
+                .insert("gen_total_kwh".into(), egen_all);
+        }
         metrics
             .custom_metrics
             .insert("eps_voltage_l1n".into(), eps_v_l1n);
