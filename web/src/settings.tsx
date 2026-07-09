@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { Link } from 'wouter'
-import { DeviceListItemDto, DeviceSettingDto, SettingValueDto } from '../../types/ts'
+import { DeviceSettingDto, SettingValueDto } from '../../types/ts'
+import { DeviceSelect, useDeviceSelection, useDevices } from './device-select'
 
 // Editable state per setting: the string form the input holds
 function initial(s: SettingValueDto): string {
@@ -128,31 +129,32 @@ function TimeWindowInput({ draft, onChange }: { draft: string; onChange: (d: str
 }
 
 export function SettingsPage() {
-  const [device, setDevice] = useState<DeviceListItemDto | null>(null)
+  const { devices, error: devicesError } = useDevices()
+  const settable = useMemo(() => (devices || []).filter(d => d.supportsSettings), [devices])
+  const { device, select } = useDeviceSelection(devices ? settable : null)
   const [settings, setSettings] = useState<DeviceSettingDto[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [loaded, setLoaded] = useState(false)
+  const [settingsError, setSettingsError] = useState<string | null>(null)
+  const error = devicesError || settingsError
+  const loaded = devices != null
+  const deviceId = device?.id ?? null
 
   useEffect(() => {
+    setSettings(null)
+    setSettingsError(null)
+    if (!deviceId) return
     let cancelled = false
     async function load() {
       try {
-        const devices: DeviceListItemDto[] = await fetch('/api/v1/devices').then(r => r.json())
-        if (cancelled) return
-        const dev = devices.find(d => d.protocolName === 'eg4-6000xp-modbus') || null
-        setDevice(dev)
-        setLoaded(true)
-        if (!dev) return
-        const res = await fetch(`/api/v1/devices/${dev.id}/settings`)
+        const res = await fetch(`/api/v1/devices/${deviceId}/settings`)
         if (!res.ok) throw new Error((await res.json()).details || res.statusText)
         if (!cancelled) setSettings(await res.json())
       } catch (e) {
-        if (!cancelled) setError(String(e))
+        if (!cancelled) setSettingsError(String(e))
       }
     }
     load()
     return () => { cancelled = true }
-  }, [])
+  }, [deviceId])
 
   const groups = useMemo(() => {
     const out = new Map<string, DeviceSettingDto[]>()
@@ -169,10 +171,13 @@ export function SettingsPage() {
 
   return (
     <div class="p-4 md:p-6 space-y-4 max-w-3xl mx-auto">
-      <div class="flex items-center justify-between">
-        <h1 class="text-xl font-semibold" style={{ color: 'var(--vz-ink)' }}>
-          Inverter Settings{device ? ` — ${device.name}` : ''}
-        </h1>
+      <div class="flex items-center justify-between flex-wrap gap-2">
+        <div class="flex items-center gap-3">
+          <h1 class="text-xl font-semibold" style={{ color: 'var(--vz-ink)' }}>
+            Inverter Settings{device ? ` — ${device.name}` : ''}
+          </h1>
+          <DeviceSelect devices={settable} selected={deviceId} onSelect={select} />
+        </div>
         <Link href="/"><a class="text-sm hover:underline" style={{ color: 'var(--vz-load)' }}>Dashboard</a></Link>
       </div>
       <div class="text-sm" style={{ color: 'var(--vz-ink-3)' }}>
@@ -182,7 +187,7 @@ export function SettingsPage() {
       {error && <div class="vz-card p-4" style={{ color: 'var(--vz-crit)' }}>Error: {error}</div>}
       {!error && !loaded && <div class="p-4" style={{ color: 'var(--vz-ink-3)' }}>Loading…</div>}
       {!error && loaded && !device && (
-        <div class="vz-card p-4" style={{ color: 'var(--vz-ink-2)' }}>No EG4 6000XP device configured.</div>
+        <div class="vz-card p-4" style={{ color: 'var(--vz-ink-2)' }}>No devices with configurable settings.</div>
       )}
       {!error && device && settings === null && (
         <div class="p-4" style={{ color: 'var(--vz-ink-3)' }}>Reading settings from inverter…</div>

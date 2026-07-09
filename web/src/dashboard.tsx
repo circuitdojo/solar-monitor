@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { Link } from 'wouter'
-import { DeviceData, DeviceListItemDto } from '../../types/ts'
+import { DeviceData } from '../../types/ts'
+import { DeviceSelect, useDeviceSelection, useDevices } from './device-select'
 
 // One polled reading, flattened for charting
 type Sample = {
@@ -34,34 +35,33 @@ function toSample(d: DeviceData): Sample {
   }
 }
 
-function useLiveData() {
-  const [device, setDevice] = useState<DeviceListItemDto | null>(null)
+function useLiveData(deviceId: string | null) {
   const [samples, setSamples] = useState<Sample[]>([])
   const [wsUp, setWsUp] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    setSamples([])
+    setWsUp(false)
+    setError(null)
+    if (!deviceId) return
+
     let cancelled = false
     let ws: WebSocket | null = null
     let retry: ReturnType<typeof setTimeout> | null = null
 
     async function init() {
       try {
-        const devices: DeviceListItemDto[] = await fetch('/api/v1/devices').then(r => r.json())
-        if (cancelled) return
-        const dev = devices.find(d => d.enabled) || devices[0] || null
-        setDevice(dev)
-        if (!dev) return
-        const hist: DeviceData[] = await fetch(`/api/v1/devices/${dev.id}/data?limit=${BUFFER}`).then(r => r.json())
+        const hist: DeviceData[] = await fetch(`/api/v1/devices/${deviceId}/data?limit=${BUFFER}`).then(r => r.json())
         if (cancelled) return
         setSamples(hist.map(toSample).sort((a, b) => a.t - b.t))
-        connect(dev.id)
+        connect()
       } catch (e) {
         if (!cancelled) setError(String(e))
       }
     }
 
-    function connect(deviceId: string) {
+    function connect() {
       const proto = location.protocol === 'https:' ? 'wss' : 'ws'
       ws = new WebSocket(`${proto}://${location.host}/api/v1/ws`)
       ws.onopen = () => setWsUp(true)
@@ -75,7 +75,7 @@ function useLiveData() {
       }
       ws.onclose = () => {
         setWsUp(false)
-        if (!cancelled) retry = setTimeout(() => connect(deviceId), 3000)
+        if (!cancelled) retry = setTimeout(connect, 3000)
       }
     }
 
@@ -85,9 +85,9 @@ function useLiveData() {
       if (retry) clearTimeout(retry)
       ws?.close()
     }
-  }, [])
+  }, [deviceId])
 
-  return { device, samples, wsUp, error }
+  return { samples, wsUp, error }
 }
 
 // --- formatting ---
@@ -376,7 +376,10 @@ function FlowStrip({ s }: { s: Sample }) {
 // --- page ---
 
 export function DashboardPage() {
-  const { device, samples, wsUp, error } = useLiveData()
+  const { devices, error: devicesError } = useDevices()
+  const { device, select } = useDeviceSelection(devices)
+  const { samples, wsUp, error: dataError } = useLiveData(device?.id ?? null)
+  const error = devicesError || dataError
   const latest = samples.length ? samples[samples.length - 1] : null
   const stale = latest ? Date.now() - latest.t > 30_000 : true
 
@@ -417,6 +420,7 @@ export function DashboardPage() {
       <div class="flex items-center justify-between flex-wrap gap-2">
         <div class="flex items-center gap-3">
           <h1 class="text-xl font-semibold" style={{ color: 'var(--vz-ink)' }}>{device?.name || 'Solar Monitor'}</h1>
+          <DeviceSelect devices={devices || []} selected={device?.id ?? null} onSelect={select} />
           <span
             class="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full"
             style={{
@@ -437,7 +441,7 @@ export function DashboardPage() {
       </div>
 
       {error && <Card><div style={{ color: 'var(--vz-crit)' }}>Error: {error}</div></Card>}
-      {!error && !device && <Card><div style={{ color: 'var(--vz-ink-2)' }}>No devices configured yet — add one on the Devices page.</div></Card>}
+      {!error && devices != null && !device && <Card><div style={{ color: 'var(--vz-ink-2)' }}>No devices configured yet — add one on the Devices page.</div></Card>}
 
       {device && (
         <>

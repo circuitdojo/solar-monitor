@@ -2,7 +2,7 @@ import { render } from 'preact'
 import { useEffect, useState } from 'preact/hooks'
 import { Link, Route, Router } from 'wouter'
 import './index.css'
-import { DeviceListItemDto } from '../../types/ts'
+import { DeviceListItemDto, ProtocolInfoDto } from '../../types/ts'
 import { DashboardPage } from './dashboard'
 import { SettingsPage } from './settings'
 
@@ -103,10 +103,11 @@ function Field({ label, children }: { label: string; children: any }) {
 type AddDeviceProps = { onClose: () => void; onSaved: () => void }
 function AddDeviceModal({ onClose, onSaved }: AddDeviceProps) {
   const [serialPorts, setSerialPorts] = useState<string[]>([])
+  const [protocols, setProtocols] = useState<ProtocolInfoDto[]>([])
   const [id, setId] = useState('')
   const [name, setName] = useState('')
   const [deviceType, setDeviceType] = useState<DeviceListItemDto['deviceType']>('solarInverter')
-  const [protocolName, setProtocolName] = useState('eg4-6000xp-modbus')
+  const [protocolName, setProtocolName] = useState('')
   const [serialPort, setSerialPort] = useState('')
   const [baudRate, setBaudRate] = useState('19200')
   const [unitId, setUnitId] = useState('1')
@@ -117,6 +118,13 @@ function AddDeviceModal({ onClose, onSaved }: AddDeviceProps) {
 
   useEffect(() => {
     fetch('/api/v1/system/serial-ports').then(r => r.json()).then(setSerialPorts).catch(() => setSerialPorts([]))
+    fetch('/api/v1/protocols')
+      .then(r => r.json())
+      .then((ps: ProtocolInfoDto[]) => {
+        setProtocols(ps)
+        setProtocolName(prev => prev || ps[0]?.protocolName || '')
+      })
+      .catch(() => setProtocols([]))
   }, [])
 
   async function save() {
@@ -161,7 +169,9 @@ function AddDeviceModal({ onClose, onSaved }: AddDeviceProps) {
               </select>
             </Field>
             <Field label="Protocol">
-              <input class="vz-input" value={protocolName} onInput={(e: any) => setProtocolName(e.target.value)} />
+              <select class="vz-input" value={protocolName} onChange={(e: any) => setProtocolName(e.target.value)}>
+                {protocols.map(p => <option value={p.protocolName}>{p.name}</option>)}
+              </select>
             </Field>
             <Field label="Serial Port">
               <select class="vz-input" value={serialPort} onChange={(e: any) => setSerialPort(e.target.value)}>
