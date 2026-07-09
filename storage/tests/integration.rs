@@ -1,13 +1,19 @@
-use solar_monitor_storage::DataStore;
-use solar_monitor_core as core;
-use contracts as dto;
 use chrono::Utc;
+use contracts as dto;
+use solar_monitor_core as core;
+use solar_monitor_storage::DataStore;
 
 #[tokio::test]
 async fn storage_round_trip() {
     let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test-output");
     std::fs::create_dir_all(&base).unwrap();
-    let db_path = base.join(format!("storage-{}.sqlite", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+    let db_path = base.join(format!(
+        "storage-{}.sqlite",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
     let db_path_str = db_path.to_string_lossy().to_string();
 
     let store = DataStore::new(&db_path_str).await.expect("init store");
@@ -36,13 +42,25 @@ async fn storage_round_trip() {
         device_id: "dev1".into(),
         timestamp: Utc::now(),
         device_type: dto::DeviceType::SolarInverter,
-        metrics: dto::DeviceMetrics { pv_voltage: Some(100.0), pv_current: Some(5.0), ..Default::default() },
-        status: dto::DeviceStatus { is_connected: true, last_seen: Utc::now(), health: dto::HealthStatus::Healthy, error_message: None },
+        metrics: dto::DeviceMetrics {
+            pv_voltage: Some(100.0),
+            pv_current: Some(5.0),
+            ..Default::default()
+        },
+        status: dto::DeviceStatus {
+            is_connected: true,
+            last_seen: Utc::now(),
+            health: dto::HealthStatus::Healthy,
+            error_message: None,
+        },
         raw_data: Some("(mock)".into()),
     };
     store.store_device_data(&data).await.expect("store data");
 
-    let got = store.get_latest_device_data("dev1").await.expect("get latest");
+    let got = store
+        .get_latest_device_data("dev1")
+        .await
+        .expect("get latest");
     assert!(got.is_some());
     let got = got.unwrap();
     assert_eq!(got.device_id, "dev1");

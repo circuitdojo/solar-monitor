@@ -143,7 +143,7 @@ impl DeviceProtocol for Eg4_6000xpModbus {
             supported_device_types: &[DeviceType::SolarInverter],
             capabilities: ProtocolCapabilities {
                 supports_discovery: true,
-                supports_commands: false,
+                supports_commands: true,
                 supports_real_time: true,
                 max_concurrent_connections: Some(1),
             },
@@ -156,26 +156,31 @@ impl DeviceProtocol for Eg4_6000xpModbus {
 
     async fn discover_devices(&self, scan: &ScanConfig) -> Result<Vec<DiscoveredDevice>> {
         let mut out = Vec::new();
+        // The 6000XP Modbus interface (dongle port) runs at 19200; sweep 9600 as fallback
+        let bauds: &[u32] = &[19200, 9600];
         for port in &scan.serial_ports {
-            for unit_id in 1u8..=3u8 {
-                if let Ok(_) =
-                    try_read_basic_modbus(port, 9600, unit_id, scan.timeout_seconds as u64).await
-                {
-                    out.push(DiscoveredDevice {
-                        id: format!("eg4-6000xp-{}-{}", port.replace('/', "_"), unit_id),
-                        name: format!("EG4 6000XP on {} (id {})", port, unit_id),
-                        device_type: DeviceType::SolarInverter,
-                        protocol: "eg4-6000xp-modbus".to_string(),
-                        connection_params: HashMap::from([
-                            ("serial_port".to_string(), port.clone()),
-                            ("baud_rate".to_string(), "9600".to_string()),
-                            ("data_bits".to_string(), "8".to_string()),
-                            ("parity".to_string(), "none".to_string()),
-                            ("stop_bits".to_string(), "1".to_string()),
-                            ("unit_id".to_string(), unit_id.to_string()),
-                        ]),
-                    });
-                    break;
+            'port: for &baud in bauds {
+                for unit_id in 1u8..=3u8 {
+                    if try_read_basic_modbus(port, baud, unit_id, scan.timeout_seconds as u64)
+                        .await
+                        .is_ok()
+                    {
+                        out.push(DiscoveredDevice {
+                            id: format!("eg4-6000xp-{}-{}", port.replace('/', "_"), unit_id),
+                            name: format!("EG4 6000XP on {} (id {})", port, unit_id),
+                            device_type: DeviceType::SolarInverter,
+                            protocol: "eg4-6000xp-modbus".to_string(),
+                            connection_params: HashMap::from([
+                                ("serial_port".to_string(), port.clone()),
+                                ("baud_rate".to_string(), baud.to_string()),
+                                ("data_bits".to_string(), "8".to_string()),
+                                ("parity".to_string(), "none".to_string()),
+                                ("stop_bits".to_string(), "1".to_string()),
+                                ("unit_id".to_string(), unit_id.to_string()),
+                            ]),
+                        });
+                        break 'port;
+                    }
                 }
             }
         }
@@ -191,7 +196,7 @@ impl DeviceProtocol for Eg4_6000xpModbus {
             .connection_params
             .get("baud_rate")
             .and_then(|s| s.parse().ok())
-            .unwrap_or(9600);
+            .unwrap_or(19200);
         let timeout_secs: u64 = config
             .connection_params
             .get("timeout_seconds")
@@ -203,12 +208,14 @@ impl DeviceProtocol for Eg4_6000xpModbus {
             .and_then(|s| s.parse().ok())
             .unwrap_or(1u8);
 
-        let conn = Eg4ModbusConn::open(serial_port, baud, timeout_secs, unit_id).await?;
+        let conn =
+            Eg4ModbusConn::open(&config.id, serial_port, baud, timeout_secs, unit_id).await?;
         Ok(Box::new(conn))
     }
 }
 
 struct Eg4ModbusConn {
+    device_id: String,
     path: String,
     baud: u32,
     unit_id: u8,
@@ -229,6 +236,30 @@ enum PortRequest {
         qty: u16,
         resp: tokio::sync::oneshot::Sender<anyhow::Result<Vec<u16>>>,
     },
+    WriteSingleRegister {
+        unit_id: u8,
+        addr: u16,
+        value: u16,
+        resp: tokio::sync::oneshot::Sender<anyhow::Result<()>>,
+    },
+    WriteMultipleRegisters {
+        unit_id: u8,
+        addr: u16,
+        values: Vec<u16>,
+        resp: tokio::sync::oneshot::Sender<anyhow::Result<()>>,
+    },
+    WriteSingleCoil {
+        unit_id: u8,
+        addr: u16,
+        value: bool,
+        resp: tokio::sync::oneshot::Sender<anyhow::Result<()>>,
+    },
+    WriteMultipleCoils {
+        unit_id: u8,
+        addr: u16,
+        values: Vec<bool>,
+        resp: tokio::sync::oneshot::Sender<anyhow::Result<()>>,
+    },
 }
 
 impl PortHandle {
@@ -243,7 +274,73 @@ impl PortHandle {
             })
             .await
             .map_err(|_| anyhow::anyhow!("port actor unavailable"))?;
-        rx.await.map_err(|_| anyhow::anyhow!("port actor dropped"))?
+        rx.await
+            .map_err(|_| anyhow::anyhow!("port actor dropped"))?
+    }
+
+    async fn write_single_register(&self, unit_id: u8, addr: u16, value: u16) -> Result<()> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.tx
+            .send(PortRequest::WriteSingleRegister {
+                unit_id,
+                addr,
+                value,
+                resp: tx,
+            })
+            .await
+            .map_err(|_| anyhow::anyhow!("port actor unavailable"))?;
+        rx.await
+            .map_err(|_| anyhow::anyhow!("port actor dropped"))?
+    }
+
+    async fn write_multiple_registers(
+        &self,
+        unit_id: u8,
+        addr: u16,
+        values: Vec<u16>,
+    ) -> Result<()> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.tx
+            .send(PortRequest::WriteMultipleRegisters {
+                unit_id,
+                addr,
+                values,
+                resp: tx,
+            })
+            .await
+            .map_err(|_| anyhow::anyhow!("port actor unavailable"))?;
+        rx.await
+            .map_err(|_| anyhow::anyhow!("port actor dropped"))?
+    }
+
+    async fn write_single_coil(&self, unit_id: u8, addr: u16, value: bool) -> Result<()> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.tx
+            .send(PortRequest::WriteSingleCoil {
+                unit_id,
+                addr,
+                value,
+                resp: tx,
+            })
+            .await
+            .map_err(|_| anyhow::anyhow!("port actor unavailable"))?;
+        rx.await
+            .map_err(|_| anyhow::anyhow!("port actor dropped"))?
+    }
+
+    async fn write_multiple_coils(&self, unit_id: u8, addr: u16, values: Vec<bool>) -> Result<()> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.tx
+            .send(PortRequest::WriteMultipleCoils {
+                unit_id,
+                addr,
+                values,
+                resp: tx,
+            })
+            .await
+            .map_err(|_| anyhow::anyhow!("port actor unavailable"))?;
+        rx.await
+            .map_err(|_| anyhow::anyhow!("port actor dropped"))?
     }
 }
 
@@ -281,10 +378,10 @@ async fn run_port_actor(
     timeout_secs: u64,
     mut rx: tokio::sync::mpsc::Receiver<PortRequest>,
 ) {
-    use tokio_modbus::prelude::*;
-    use tokio_modbus::prelude::rtu;
-    use tokio_serial::{DataBits, Parity, SerialPortBuilderExt, SerialStream, StopBits};
     use tokio::time::{timeout, Duration};
+    use tokio_modbus::prelude::rtu;
+    use tokio_modbus::prelude::*;
+    use tokio_serial::{DataBits, Parity, SerialStream, StopBits};
 
     loop {
         // open port and attach RTU context without fixed slave
@@ -297,38 +394,131 @@ async fn run_port_actor(
             Ok(p) => p,
             Err(_e) => {
                 let _ = tokio::time::sleep(Duration::from_millis(500)).await;
-                if rx.recv().await.is_none() { break; }
+                if rx.recv().await.is_none() {
+                    break;
+                }
                 continue;
             }
         };
         let mut ctx = rtu::attach(port);
 
         while let Some(msg) = rx.recv().await {
-            let res: anyhow::Result<Vec<u16>> = match msg {
-                PortRequest::ReadInput { unit_id, addr, qty, .. } => {
+            match msg {
+                PortRequest::ReadInput {
+                    unit_id,
+                    addr,
+                    qty,
+                    resp,
+                } => {
                     // Switch slave then read
                     ctx.set_slave(Slave(unit_id));
-                    match timeout(Duration::from_secs(timeout_secs), ctx.read_input_registers(addr, qty)).await {
+                    let res = match timeout(
+                        Duration::from_secs(timeout_secs),
+                        ctx.read_input_registers(addr, qty),
+                    )
+                    .await
+                    {
                         Ok(Ok(regs)) => regs.map_err(|e| anyhow::anyhow!(e)),
                         Ok(Err(e)) => Err(anyhow::anyhow!(e)),
                         Err(_) => Err(anyhow::anyhow!("timeout")),
-                    }
+                    };
+                    let _ = resp.send(res);
+                }
+                PortRequest::WriteSingleRegister {
+                    unit_id,
+                    addr,
+                    value,
+                    resp,
+                } => {
+                    ctx.set_slave(Slave(unit_id));
+                    let res = match timeout(
+                        Duration::from_secs(timeout_secs),
+                        ctx.write_single_register(addr, value),
+                    )
+                    .await
+                    {
+                        Ok(Ok(result)) => result.map_err(|e| anyhow::anyhow!(e)).map(|_| ()),
+                        Ok(Err(e)) => Err(anyhow::anyhow!(e)),
+                        Err(_) => Err(anyhow::anyhow!("timeout")),
+                    };
+                    let _ = resp.send(res);
+                }
+                PortRequest::WriteMultipleRegisters {
+                    unit_id,
+                    addr,
+                    values,
+                    resp,
+                } => {
+                    ctx.set_slave(Slave(unit_id));
+                    let res = match timeout(
+                        Duration::from_secs(timeout_secs),
+                        ctx.write_multiple_registers(addr, &values),
+                    )
+                    .await
+                    {
+                        Ok(Ok(result)) => result.map_err(|e| anyhow::anyhow!(e)).map(|_| ()),
+                        Ok(Err(e)) => Err(anyhow::anyhow!(e)),
+                        Err(_) => Err(anyhow::anyhow!("timeout")),
+                    };
+                    let _ = resp.send(res);
+                }
+                PortRequest::WriteSingleCoil {
+                    unit_id,
+                    addr,
+                    value,
+                    resp,
+                } => {
+                    ctx.set_slave(Slave(unit_id));
+                    let res = match timeout(
+                        Duration::from_secs(timeout_secs),
+                        ctx.write_single_coil(addr, value),
+                    )
+                    .await
+                    {
+                        Ok(Ok(result)) => result.map_err(|e| anyhow::anyhow!(e)).map(|_| ()),
+                        Ok(Err(e)) => Err(anyhow::anyhow!(e)),
+                        Err(_) => Err(anyhow::anyhow!("timeout")),
+                    };
+                    let _ = resp.send(res);
+                }
+                PortRequest::WriteMultipleCoils {
+                    unit_id,
+                    addr,
+                    values,
+                    resp,
+                } => {
+                    ctx.set_slave(Slave(unit_id));
+                    let res = match timeout(
+                        Duration::from_secs(timeout_secs),
+                        ctx.write_multiple_coils(addr, &values),
+                    )
+                    .await
+                    {
+                        Ok(Ok(result)) => result.map_err(|e| anyhow::anyhow!(e)).map(|_| ()),
+                        Ok(Err(e)) => Err(anyhow::anyhow!(e)),
+                        Err(_) => Err(anyhow::anyhow!("timeout")),
+                    };
+                    let _ = resp.send(res);
                 }
             };
-            // send response back to requester
-            match msg { PortRequest::ReadInput { resp, .. } => { let _ = resp.send(res); } }
         }
         // channel closed, exit loop
         break;
     }
 }
 
-async fn read_full(port: &mut tokio_serial::SerialStream, mut buf: &mut [u8]) -> std::io::Result<()> {
+async fn read_full(
+    port: &mut tokio_serial::SerialStream,
+    mut buf: &mut [u8],
+) -> std::io::Result<()> {
     use tokio::io::AsyncReadExt;
     while !buf.is_empty() {
         let n = port.read(buf).await?;
         if n == 0 {
-            return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "eof"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "eof",
+            ));
         }
         let tmp = buf;
         buf = &mut tmp[n..];
@@ -337,9 +527,16 @@ async fn read_full(port: &mut tokio_serial::SerialStream, mut buf: &mut [u8]) ->
 }
 
 impl Eg4ModbusConn {
-    async fn open(path: &str, baud: u32, timeout_secs: u64, unit_id: u8) -> Result<Self> {
+    async fn open(
+        device_id: &str,
+        path: &str,
+        baud: u32,
+        timeout_secs: u64,
+        unit_id: u8,
+    ) -> Result<Self> {
         let handle = get_or_spawn_port_actor(path, baud, timeout_secs).await;
         Ok(Self {
+            device_id: device_id.to_string(),
             path: path.to_string(),
             baud,
             unit_id,
@@ -354,7 +551,9 @@ impl Eg4ModbusConn {
             .read_input_registers(self.unit_id, addr, qty)
             .await?;
         let mut out = Vec::with_capacity(regs.len() * 2);
-        for r in regs { out.extend_from_slice(&r.to_le_bytes()); }
+        for r in regs {
+            out.extend_from_slice(&r.to_le_bytes());
+        }
         Ok(out)
     }
 }
@@ -374,7 +573,10 @@ impl DeviceConnection for Eg4ModbusConn {
         // b1 indices in bytes
         let vpv1 = u16le(&b1[2..4]) as f64 / 10.0;
         let vbat = u16le(&b1[8..10]) as f64 / 10.0;
-        let soc = u16le(&b1[10..12]) as f64;
+        // reg 5 packs SOC (low byte) and SOH (high byte)
+        let soc_soh = u16le(&b1[10..12]);
+        let soc = (soc_soh & 0xFF) as f64;
+        let soh = (soc_soh >> 8) as f64;
         let vac_r = u16le(&b1[24..26]) as f64 / 10.0;
         let fac = u16le(&b1[30..32]) as f64 / 100.0;
         let pinv = u16le(&b1[32..34]) as f64; // W
@@ -429,14 +631,22 @@ impl DeviceConnection for Eg4ModbusConn {
         let tbat = u16le(&b2[54..56]) as f64;
         let epv1_all = (u16le(&b2[0..2]) as u32 | ((u16le(&b2[2..4]) as u32) << 16)) as f64 / 10.0;
         let epv2_all = (u16le(&b2[4..6]) as u32 | ((u16le(&b2[6..8]) as u32) << 16)) as f64 / 10.0;
-        let epv3_all = (u16le(&b2[8..10]) as u32 | ((u16le(&b2[10..12]) as u32) << 16)) as f64 / 10.0;
-        let einv_all = (u16le(&b2[12..14]) as u32 | ((u16le(&b2[14..16]) as u32) << 16)) as f64 / 10.0;
-        let erec_all = (u16le(&b2[16..18]) as u32 | ((u16le(&b2[18..20]) as u32) << 16)) as f64 / 10.0;
-        let echg_all = (u16le(&b2[20..22]) as u32 | ((u16le(&b2[22..24]) as u32) << 16)) as f64 / 10.0;
-        let edischg_all = (u16le(&b2[24..26]) as u32 | ((u16le(&b2[26..28]) as u32) << 16)) as f64 / 10.0;
-        let eeps_all = (u16le(&b2[28..30]) as u32 | ((u16le(&b2[30..32]) as u32) << 16)) as f64 / 10.0;
-        let etogrid_all = (u16le(&b2[32..34]) as u32 | ((u16le(&b2[34..36]) as u32) << 16)) as f64 / 10.0;
-        let etouser_all = (u16le(&b2[36..38]) as u32 | ((u16le(&b2[38..40]) as u32) << 16)) as f64 / 10.0;
+        let epv3_all =
+            (u16le(&b2[8..10]) as u32 | ((u16le(&b2[10..12]) as u32) << 16)) as f64 / 10.0;
+        let einv_all =
+            (u16le(&b2[12..14]) as u32 | ((u16le(&b2[14..16]) as u32) << 16)) as f64 / 10.0;
+        let erec_all =
+            (u16le(&b2[16..18]) as u32 | ((u16le(&b2[18..20]) as u32) << 16)) as f64 / 10.0;
+        let echg_all =
+            (u16le(&b2[20..22]) as u32 | ((u16le(&b2[22..24]) as u32) << 16)) as f64 / 10.0;
+        let edischg_all =
+            (u16le(&b2[24..26]) as u32 | ((u16le(&b2[26..28]) as u32) << 16)) as f64 / 10.0;
+        let eeps_all =
+            (u16le(&b2[28..30]) as u32 | ((u16le(&b2[30..32]) as u32) << 16)) as f64 / 10.0;
+        let etogrid_all =
+            (u16le(&b2[32..34]) as u32 | ((u16le(&b2[34..36]) as u32) << 16)) as f64 / 10.0;
+        let etouser_all =
+            (u16le(&b2[36..38]) as u32 | ((u16le(&b2[38..40]) as u32) << 16)) as f64 / 10.0;
 
         // BMS current and cell stats (b3)
         let bat_current_bms = i16le(&b3[36..38]) as f64 / 100.0;
@@ -468,7 +678,11 @@ impl DeviceConnection for Eg4ModbusConn {
         let mut metrics = DeviceMetrics::default();
         metrics.pv_voltage = Some(vpv1);
         metrics.battery_voltage = Some(vbat);
-        metrics.battery_current = Some(if bat_current_bms.abs() > 0.0 { bat_current_bms } else { batt_cur });
+        metrics.battery_current = Some(if bat_current_bms.abs() > 0.0 {
+            bat_current_bms
+        } else {
+            batt_cur
+        });
         metrics.battery_soc_percentage = Some(soc);
         metrics.grid_voltage = Some(vac_r);
         metrics.grid_frequency = Some(fac);
@@ -481,62 +695,161 @@ impl DeviceConnection for Eg4ModbusConn {
         metrics.custom_metrics.insert("pv1_voltage".into(), vpv1);
         metrics.custom_metrics.insert("pv2_voltage".into(), vpv2);
         metrics.custom_metrics.insert("pv3_voltage".into(), vpv3);
-        metrics.custom_metrics.insert("grid_voltage_s".into(), vac_s);
-        metrics.custom_metrics.insert("grid_voltage_t".into(), vac_t);
-        metrics.custom_metrics.insert("inverter_rms_current".into(), linv_rms);
+        metrics
+            .custom_metrics
+            .insert("grid_voltage_s".into(), vac_s);
+        metrics
+            .custom_metrics
+            .insert("grid_voltage_t".into(), vac_t);
+        metrics
+            .custom_metrics
+            .insert("inverter_rms_current".into(), linv_rms);
         metrics.custom_metrics.insert("power_factor".into(), pf);
-        metrics.custom_metrics.insert("offgrid_voltage_r".into(), veps_r);
-        metrics.custom_metrics.insert("offgrid_voltage_s".into(), veps_s);
-        metrics.custom_metrics.insert("offgrid_voltage_t".into(), veps_t);
-        metrics.custom_metrics.insert("offgrid_frequency".into(), feps);
-        metrics.custom_metrics.insert("offgrid_power_active".into(), peps);
-        metrics.custom_metrics.insert("offgrid_power_apparent".into(), seps);
-        metrics.custom_metrics.insert("export_power".into(), ptogrid);
-        metrics.custom_metrics.insert("import_power".into(), ptouser);
-        metrics.custom_metrics.insert("pv1_day_kwh".into(), epv1_day);
-        metrics.custom_metrics.insert("pv2_day_kwh".into(), epv2_day);
-        metrics.custom_metrics.insert("pv3_day_kwh".into(), epv3_day);
-        metrics.custom_metrics.insert("inverter_day_kwh".into(), einv_day);
-        metrics.custom_metrics.insert("ac_charge_day_kwh".into(), erec_day);
-        metrics.custom_metrics.insert("charge_day_kwh".into(), echg_day);
-        metrics.custom_metrics.insert("discharge_day_kwh".into(), edischg_day);
-        metrics.custom_metrics.insert("offgrid_day_kwh".into(), eeps_day);
-        metrics.custom_metrics.insert("export_day_kwh".into(), etogrid_day);
-        metrics.custom_metrics.insert("import_day_kwh".into(), etouser_day);
+        metrics
+            .custom_metrics
+            .insert("offgrid_voltage_r".into(), veps_r);
+        metrics
+            .custom_metrics
+            .insert("offgrid_voltage_s".into(), veps_s);
+        metrics
+            .custom_metrics
+            .insert("offgrid_voltage_t".into(), veps_t);
+        metrics
+            .custom_metrics
+            .insert("offgrid_frequency".into(), feps);
+        metrics
+            .custom_metrics
+            .insert("offgrid_power_active".into(), peps);
+        metrics
+            .custom_metrics
+            .insert("offgrid_power_apparent".into(), seps);
+        metrics
+            .custom_metrics
+            .insert("export_power".into(), ptogrid);
+        metrics
+            .custom_metrics
+            .insert("import_power".into(), ptouser);
+        metrics
+            .custom_metrics
+            .insert("pv1_day_kwh".into(), epv1_day);
+        metrics
+            .custom_metrics
+            .insert("pv2_day_kwh".into(), epv2_day);
+        metrics
+            .custom_metrics
+            .insert("pv3_day_kwh".into(), epv3_day);
+        metrics
+            .custom_metrics
+            .insert("inverter_day_kwh".into(), einv_day);
+        metrics
+            .custom_metrics
+            .insert("ac_charge_day_kwh".into(), erec_day);
+        metrics
+            .custom_metrics
+            .insert("charge_day_kwh".into(), echg_day);
+        metrics
+            .custom_metrics
+            .insert("discharge_day_kwh".into(), edischg_day);
+        metrics
+            .custom_metrics
+            .insert("offgrid_day_kwh".into(), eeps_day);
+        metrics
+            .custom_metrics
+            .insert("export_day_kwh".into(), etogrid_day);
+        metrics
+            .custom_metrics
+            .insert("import_day_kwh".into(), etouser_day);
         metrics.custom_metrics.insert("bus1_voltage".into(), vbus1);
         metrics.custom_metrics.insert("bus2_voltage".into(), vbus2);
-        metrics.custom_metrics.insert("pv1_total_kwh".into(), epv1_all);
-        metrics.custom_metrics.insert("pv2_total_kwh".into(), epv2_all);
-        metrics.custom_metrics.insert("pv3_total_kwh".into(), epv3_all);
-        metrics.custom_metrics.insert("inverter_total_kwh".into(), einv_all);
-        metrics.custom_metrics.insert("ac_charge_total_kwh".into(), erec_all);
-        metrics.custom_metrics.insert("charge_total_kwh".into(), echg_all);
-        metrics.custom_metrics.insert("discharge_total_kwh".into(), edischg_all);
-        metrics.custom_metrics.insert("offgrid_total_kwh".into(), eeps_all);
-        metrics.custom_metrics.insert("export_total_kwh".into(), etogrid_all);
-        metrics.custom_metrics.insert("import_total_kwh".into(), etouser_all);
+        metrics
+            .custom_metrics
+            .insert("pv1_total_kwh".into(), epv1_all);
+        metrics
+            .custom_metrics
+            .insert("pv2_total_kwh".into(), epv2_all);
+        metrics
+            .custom_metrics
+            .insert("pv3_total_kwh".into(), epv3_all);
+        metrics
+            .custom_metrics
+            .insert("inverter_total_kwh".into(), einv_all);
+        metrics
+            .custom_metrics
+            .insert("ac_charge_total_kwh".into(), erec_all);
+        metrics
+            .custom_metrics
+            .insert("charge_total_kwh".into(), echg_all);
+        metrics
+            .custom_metrics
+            .insert("discharge_total_kwh".into(), edischg_all);
+        metrics
+            .custom_metrics
+            .insert("offgrid_total_kwh".into(), eeps_all);
+        metrics
+            .custom_metrics
+            .insert("export_total_kwh".into(), etogrid_all);
+        metrics
+            .custom_metrics
+            .insert("import_total_kwh".into(), etouser_all);
         metrics.custom_metrics.insert("battery_temp_c".into(), tbat);
-        metrics.custom_metrics.insert("heatsink_temp1_c".into(), tradiator1);
-        metrics.custom_metrics.insert("heatsink_temp2_c".into(), tradiator2);
-        metrics.custom_metrics.insert("bms_max_cell_v".into(), max_cell_v);
-        metrics.custom_metrics.insert("bms_min_cell_v".into(), min_cell_v);
-        metrics.custom_metrics.insert("bms_max_cell_t_c".into(), max_cell_t);
-        metrics.custom_metrics.insert("bms_min_cell_t_c".into(), min_cell_t);
-        metrics.custom_metrics.insert("bms_cycles".into(), cycles_bms);
+        metrics
+            .custom_metrics
+            .insert("heatsink_temp1_c".into(), tradiator1);
+        metrics
+            .custom_metrics
+            .insert("heatsink_temp2_c".into(), tradiator2);
+        metrics
+            .custom_metrics
+            .insert("bms_max_cell_v".into(), max_cell_v);
+        metrics
+            .custom_metrics
+            .insert("bms_min_cell_v".into(), min_cell_v);
+        metrics
+            .custom_metrics
+            .insert("bms_max_cell_t_c".into(), max_cell_t);
+        metrics
+            .custom_metrics
+            .insert("bms_min_cell_t_c".into(), min_cell_t);
+        metrics
+            .custom_metrics
+            .insert("bms_cycles".into(), cycles_bms);
+        metrics.custom_metrics.insert("battery_soh".into(), soh);
         metrics.custom_metrics.insert("gen_voltage".into(), gen_v);
         metrics.custom_metrics.insert("gen_frequency".into(), gen_f);
         metrics.custom_metrics.insert("gen_power".into(), gen_p);
-        metrics.custom_metrics.insert("eps_voltage_l1n".into(), eps_v_l1n);
-        metrics.custom_metrics.insert("eps_voltage_l2n".into(), eps_v_l2n);
-        metrics.custom_metrics.insert("eps_power_l1n".into(), peps_l1n);
-        metrics.custom_metrics.insert("eps_power_l2n".into(), peps_l2n);
-        metrics.custom_metrics.insert("load_day_kwh".into(), eload_day);
-        metrics.custom_metrics.insert("inverter_power_s".into(), pinv_s);
-        metrics.custom_metrics.insert("inverter_power_t".into(), pinv_t);
-        metrics.custom_metrics.insert("export_power_s".into(), ptogrid_s);
-        metrics.custom_metrics.insert("export_power_t".into(), ptogrid_t);
-        metrics.custom_metrics.insert("import_power_s".into(), ptouser_s);
-        metrics.custom_metrics.insert("import_power_t".into(), ptouser_t);
+        metrics
+            .custom_metrics
+            .insert("eps_voltage_l1n".into(), eps_v_l1n);
+        metrics
+            .custom_metrics
+            .insert("eps_voltage_l2n".into(), eps_v_l2n);
+        metrics
+            .custom_metrics
+            .insert("eps_power_l1n".into(), peps_l1n);
+        metrics
+            .custom_metrics
+            .insert("eps_power_l2n".into(), peps_l2n);
+        metrics
+            .custom_metrics
+            .insert("load_day_kwh".into(), eload_day);
+        metrics
+            .custom_metrics
+            .insert("inverter_power_s".into(), pinv_s);
+        metrics
+            .custom_metrics
+            .insert("inverter_power_t".into(), pinv_t);
+        metrics
+            .custom_metrics
+            .insert("export_power_s".into(), ptogrid_s);
+        metrics
+            .custom_metrics
+            .insert("export_power_t".into(), ptogrid_t);
+        metrics
+            .custom_metrics
+            .insert("import_power_s".into(), ptouser_s);
+        metrics
+            .custom_metrics
+            .insert("import_power_t".into(), ptouser_t);
 
         let status = DeviceStatus {
             is_connected: true,
@@ -545,7 +858,7 @@ impl DeviceConnection for Eg4ModbusConn {
             error_message: None,
         };
         Ok(DeviceData {
-            device_id: "eg4-6000xp".into(),
+            device_id: self.device_id.clone(),
             timestamp: now,
             device_type: DeviceType::SolarInverter,
             metrics,
@@ -806,5 +1119,68 @@ mod tests {
         // custom metrics should include bus_voltage and scc_voltage
         assert_eq!(m.custom_metrics.get("bus_voltage"), Some(&400.0));
         assert_eq!(m.custom_metrics.get("scc_voltage"), Some(&54.0));
+    }
+}
+
+// High-level command execution entry for EG4 6000XP
+pub async fn eg4_6000xp_execute(
+    cfg: &core::DeviceConfig,
+    cmd: &contracts::Eg4Command,
+) -> anyhow::Result<()> {
+    let handle = get_or_spawn_port_actor(
+        cfg.connection_params
+            .get("serial_port")
+            .ok_or_else(|| anyhow::anyhow!("missing serial_port"))?,
+        cfg.connection_params
+            .get("baud_rate")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(19200),
+        cfg.connection_params
+            .get("timeout_seconds")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(3),
+    )
+    .await;
+    let unit_id: u8 = cfg
+        .connection_params
+        .get("unit_id")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1);
+
+    // TODO: populate allowlist with safe ranges
+    let allow_write_reg = |_: u16, _: usize| -> bool { false };
+
+    match cmd {
+        contracts::Eg4Command::WriteRegister { addr, value } => {
+            if !allow_write_reg(*addr, 1) {
+                return Err(anyhow::anyhow!("disallowed register write"));
+            }
+            handle.write_single_register(unit_id, *addr, *value).await
+        }
+        contracts::Eg4Command::WriteRegisters { addr, values } => {
+            if !allow_write_reg(*addr, values.len()) {
+                return Err(anyhow::anyhow!("disallowed register write"));
+            }
+            handle
+                .write_multiple_registers(unit_id, *addr, values.clone())
+                .await
+        }
+        contracts::Eg4Command::WriteCoil { addr, value } => {
+            if !allow_write_reg(*addr, 1) {
+                return Err(anyhow::anyhow!("disallowed coil write"));
+            }
+            handle.write_single_coil(unit_id, *addr, *value).await
+        }
+        contracts::Eg4Command::WriteCoils { addr, values } => {
+            if !allow_write_reg(*addr, values.len()) {
+                return Err(anyhow::anyhow!("disallowed coil write"));
+            }
+            handle
+                .write_multiple_coils(unit_id, *addr, values.clone())
+                .await
+        }
+        contracts::Eg4Command::SetMaxChargeCurrent { .. } => {
+            Err(anyhow::anyhow!("named command mapping not implemented"))
+        }
     }
 }

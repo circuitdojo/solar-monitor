@@ -1,7 +1,6 @@
 //! Minimal entrypoint with CLI flags
 
 use anyhow::Result;
-use axum::routing::get;
 use clap::Parser;
 use std::sync::Arc;
 
@@ -99,12 +98,17 @@ async fn main() -> Result<()> {
             }
         };
         if ports.is_empty() {
-            println!("No serial ports found. Try --serial-ports or check permissions (dialout group).");
+            println!(
+                "No serial ports found. Try --serial-ports or check permissions (dialout group)."
+            );
             return Ok(());
         }
 
         println!("Scanning ports: {}", ports.join(","));
-        let scan = solar_monitor_core::ScanConfig { serial_ports: ports, timeout_seconds: cli.timeout };
+        let scan = solar_monitor_core::ScanConfig {
+            serial_ports: ports,
+            timeout_seconds: cli.timeout,
+        };
 
         // Only try Modbus RTU per current focus (PI30 skipped)
         println!("Skipping PI30 discovery");
@@ -153,8 +157,7 @@ async fn main() -> Result<()> {
         {
             solar_monitor_api::router(state)
         }
-    }
-    .route("/", get(|| async { "solar-monitor" }));
+    };
 
     println!(
         "solar-monitor v{} | protocols: {:?}",
@@ -184,7 +187,11 @@ fn install_service(cli: &Cli) -> Result<()> {
         .data_dir
         .clone()
         .unwrap_or_else(|| "/var/lib/solar-monitor".to_string());
-    let db_path = if cli.db != "./data/solar.db" { cli.db.clone() } else { format!("{}/solar.db", data_dir) };
+    let db_path = if cli.db != "./data/solar.db" {
+        cli.db.clone()
+    } else {
+        format!("{}/solar.db", data_dir)
+    };
 
     // Ensure directories exist
     if let Some(parent) = PathBuf::from(&db_path).parent() {
@@ -203,7 +210,9 @@ fn install_service(cli: &Cli) -> Result<()> {
     unit.push_str("[Service]\n");
     unit.push_str("Type=simple\n");
     unit.push_str("Environment=RUST_LOG=info\n");
-    if let Some(user) = &cli.user { unit.push_str(&format!("User={}\n", user)); }
+    if let Some(user) = &cli.user {
+        unit.push_str(&format!("User={}\n", user));
+    }
     unit.push_str(&format!(
         "ExecStart={} --serve --bind {} --port {} --db {}\n",
         exe_str, cli.bind, cli.port, db_path
@@ -230,7 +239,12 @@ fn install_service(cli: &Cli) -> Result<()> {
             let local = PathBuf::from(format!("{}.service", cli.service_name));
             let mut f = fs::File::create(&local)?;
             f.write_all(unit.as_bytes())?;
-            println!("Could not write {} ({}). Wrote {} instead.", systemd_path.display(), e, local.display());
+            println!(
+                "Could not write {} ({}). Wrote {} instead.",
+                systemd_path.display(),
+                e,
+                local.display()
+            );
             println!("Install manually with:\n  sudo cp {} {}\n  sudo systemctl daemon-reload\n  sudo systemctl enable {}\n  sudo systemctl start {}", local.display(), systemd_path.display(), cli.service_name, cli.service_name);
         }
     }

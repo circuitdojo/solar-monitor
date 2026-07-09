@@ -5,11 +5,11 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-pub use contracts::{
-    DeviceData, DeviceMetrics, DeviceStatus, DeviceType, HealthStatus,
-};
+pub use contracts::{DeviceData, DeviceMetrics, DeviceStatus, DeviceType, HealthStatus};
 
-pub fn version() -> &'static str { env!("CARGO_PKG_VERSION") }
+pub fn version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
+}
 
 #[derive(Debug, Clone)]
 pub struct ProtocolMetadata {
@@ -79,7 +79,10 @@ pub struct ProtocolRegistry {
 
 impl ProtocolRegistry {
     pub fn new() -> Self {
-        Self { protocols: HashMap::new(), metadata: HashMap::new() }
+        Self {
+            protocols: HashMap::new(),
+            metadata: HashMap::new(),
+        }
     }
 
     pub fn register_protocol(&mut self, proto: Arc<dyn DeviceProtocol>) {

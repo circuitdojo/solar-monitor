@@ -71,10 +71,12 @@ impl DataStore {
     }
 
     pub async fn get_latest_device_data(&self, device_id: &str) -> Result<Option<DeviceData>> {
-        let row = sqlx::query("SELECT * FROM device_data WHERE device_id = ? ORDER BY timestamp DESC LIMIT 1")
-            .bind(device_id)
-            .fetch_optional(&self.pool)
-            .await?;
+        let row = sqlx::query(
+            "SELECT * FROM device_data WHERE device_id = ? ORDER BY timestamp DESC LIMIT 1",
+        )
+        .bind(device_id)
+        .fetch_optional(&self.pool)
+        .await?;
 
         Ok(row.map(row_to_device_data))
     }
@@ -164,7 +166,8 @@ impl DataStore {
                 "energymeter" => DeviceType::EnergyMeter,
                 _ => DeviceType::SolarInverter,
             };
-            let connection_params: std::collections::HashMap<String, String> = serde_json::from_str(&params).unwrap_or_default();
+            let connection_params: std::collections::HashMap<String, String> =
+                serde_json::from_str(&params).unwrap_or_default();
             out.push(DeviceConfig {
                 id,
                 name,
@@ -199,7 +202,8 @@ impl DataStore {
                 "energymeter" => DeviceType::EnergyMeter,
                 _ => DeviceType::SolarInverter,
             };
-            let connection_params: std::collections::HashMap<String, String> = serde_json::from_str(&params).unwrap_or_default();
+            let connection_params: std::collections::HashMap<String, String> =
+                serde_json::from_str(&params).unwrap_or_default();
             DeviceConfig {
                 id,
                 name,

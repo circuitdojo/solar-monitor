@@ -168,3 +168,30 @@ pub struct ErrorResponseDto {
     pub details: String,
     pub timestamp: String,
 }
+
+// Command contracts (typed, protocol-aware)
+
+#[derive(Type, Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "type")]
+pub enum Eg4Command {
+    WriteRegister { addr: u16, value: u16 },
+    WriteRegisters { addr: u16, values: Vec<u16> },
+    WriteCoil { addr: u16, value: bool },
+    WriteCoils { addr: u16, values: Vec<bool> },
+    // Higher-level named commands can be added here, e.g.:
+    SetMaxChargeCurrent { amps: f64 },
+}
+
+#[derive(Type, Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "protocol")]
+pub enum DeviceCommandRequest {
+    #[serde(rename = "eg4-6000xp-modbus")]
+    Eg4_6000xp_Modbus { command: Eg4Command },
+}
+
+#[derive(Type, Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceCommandResponseDto {
+    pub ok: bool,
+    pub message: Option<String>,
+}

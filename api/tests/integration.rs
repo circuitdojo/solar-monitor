@@ -1,19 +1,23 @@
-use axum::{Router, http::Request};
-use tower::ServiceExt; // for `oneshot`
-use http_body_util::BodyExt; // for `collect`
+use axum::{http::Request, Router};
+use http_body_util::BodyExt;
+use tower::ServiceExt; // for `oneshot` // for `collect`
 
-use solar_monitor_api as api;
-use std::sync::Arc;
-use axum::http::StatusCode;
-use axum::body::Body;
-use serde_json::json;
-use solar_monitor_core as core;
-use contracts as dto;
 use async_trait::async_trait;
+use axum::body::Body;
+use axum::http::StatusCode;
+use contracts as dto;
+use serde_json::json;
+use solar_monitor_api as api;
+use solar_monitor_core as core;
+use std::sync::Arc;
 
 async fn test_state(_db_path: &str) -> Arc<api::AppState> {
     let registry = Arc::new(solar_monitor_protocols::create_registry());
-    let store = Arc::new(solar_monitor_storage::DataStore::new(":memory:").await.unwrap());
+    let store = Arc::new(
+        solar_monitor_storage::DataStore::new(":memory:")
+            .await
+            .unwrap(),
+    );
     let (tx, _rx) = tokio::sync::broadcast::channel::<contracts::DeviceData>(16);
     Arc::new(api::AppState {
         registry,
@@ -38,19 +42,36 @@ async fn test_state_with_mock() -> Arc<api::AppState> {
     }
     #[async_trait]
     impl core::DeviceProtocol for MockProto {
-        fn protocol_name(&self) -> &'static str { "mock-proto" }
+        fn protocol_name(&self) -> &'static str {
+            "mock-proto"
+        }
         fn metadata(&self) -> core::ProtocolMetadata {
             core::ProtocolMetadata {
                 name: "Mock",
                 version: "0.0.1",
                 description: "Test mock",
                 supported_device_types: &[dto::DeviceType::SolarInverter],
-                capabilities: core::ProtocolCapabilities { supports_discovery: false, supports_commands: true, supports_real_time: true, max_concurrent_connections: Some(10) },
+                capabilities: core::ProtocolCapabilities {
+                    supports_discovery: false,
+                    supports_commands: true,
+                    supports_real_time: true,
+                    max_concurrent_connections: Some(10),
+                },
             }
         }
-        fn supported_device_types(&self) -> Vec<dto::DeviceType> { vec![dto::DeviceType::SolarInverter] }
-        async fn discover_devices(&self, _scan: &core::ScanConfig) -> anyhow::Result<Vec<core::DiscoveredDevice>> { Ok(vec![]) }
-        async fn connect(&self, _config: &core::DeviceConfig) -> anyhow::Result<Box<dyn core::DeviceConnection>> {
+        fn supported_device_types(&self) -> Vec<dto::DeviceType> {
+            vec![dto::DeviceType::SolarInverter]
+        }
+        async fn discover_devices(
+            &self,
+            _scan: &core::ScanConfig,
+        ) -> anyhow::Result<Vec<core::DiscoveredDevice>> {
+            Ok(vec![])
+        }
+        async fn connect(
+            &self,
+            _config: &core::DeviceConfig,
+        ) -> anyhow::Result<Box<dyn core::DeviceConnection>> {
             Ok(Box::new(MockConn { n: 0 }))
         }
     }
@@ -63,19 +84,34 @@ async fn test_state_with_mock() -> Arc<api::AppState> {
                 timestamp: chrono::Utc::now(),
                 device_type: dto::DeviceType::SolarInverter,
                 metrics: dto::DeviceMetrics::default(),
-                status: dto::DeviceStatus { is_connected: true, last_seen: chrono::Utc::now(), health: dto::HealthStatus::Healthy, error_message: None },
+                status: dto::DeviceStatus {
+                    is_connected: true,
+                    last_seen: chrono::Utc::now(),
+                    health: dto::HealthStatus::Healthy,
+                    error_message: None,
+                },
                 raw_data: None,
             })
         }
-        async fn send_command(&mut self, _command: &str) -> anyhow::Result<String> { Ok("OK".into()) }
-        fn is_connected(&self) -> bool { true }
-        async fn health_check(&mut self) -> anyhow::Result<()> { Ok(()) }
+        async fn send_command(&mut self, _command: &str) -> anyhow::Result<String> {
+            Ok("OK".into())
+        }
+        fn is_connected(&self) -> bool {
+            true
+        }
+        async fn health_check(&mut self) -> anyhow::Result<()> {
+            Ok(())
+        }
     }
 
     let mut reg = core::ProtocolRegistry::new();
     reg.register_protocol(Arc::new(MockProto));
     let registry = Arc::new(reg);
-    let store = Arc::new(solar_monitor_storage::DataStore::new(":memory:").await.unwrap());
+    let store = Arc::new(
+        solar_monitor_storage::DataStore::new(":memory:")
+            .await
+            .unwrap(),
+    );
     let (tx, _rx) = tokio::sync::broadcast::channel::<contracts::DeviceData>(16);
     Arc::new(api::AppState {
         registry,
@@ -91,18 +127,42 @@ async fn test_state_with_mock() -> Arc<api::AppState> {
 async fn health_status_protocols_and_devices_list() {
     let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test-output");
     std::fs::create_dir_all(&base).unwrap();
-    let db_path = base.join(format!("api-{}.sqlite", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+    let db_path = base.join(format!(
+        "api-{}.sqlite",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
     let app = test_app(&db_path.to_string_lossy()).await;
 
     // Health
-    let res = app.clone().oneshot(Request::builder().uri("/api/v1/health").body(axum::body::Body::empty()).unwrap()).await.unwrap();
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/health")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
     assert!(res.status().is_success());
     let body = res.into_body().collect().await.unwrap().to_bytes();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(v["status"], "healthy");
 
     // Status
-    let res = app.clone().oneshot(Request::builder().uri("/api/v1/status").body(axum::body::Body::empty()).unwrap()).await.unwrap();
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/status")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
     assert!(res.status().is_success());
     let body = res.into_body().collect().await.unwrap().to_bytes();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -110,7 +170,16 @@ async fn health_status_protocols_and_devices_list() {
     assert!(v.get("version").is_some());
 
     // Protocols
-    let res = app.clone().oneshot(Request::builder().uri("/api/v1/protocols").body(axum::body::Body::empty()).unwrap()).await.unwrap();
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/protocols")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
     assert!(res.status().is_success());
     let body = res.into_body().collect().await.unwrap().to_bytes();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -118,7 +187,16 @@ async fn health_status_protocols_and_devices_list() {
     assert!(v["protocols"].as_array().unwrap().len() >= 1);
 
     // Devices (empty)
-    let res = app.clone().oneshot(Request::builder().uri("/api/v1/devices").body(axum::body::Body::empty()).unwrap()).await.unwrap();
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/devices")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
     assert!(res.status().is_success());
     let body = res.into_body().collect().await.unwrap().to_bytes();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -274,7 +352,12 @@ async fn device_command_and_range_validation() {
     assert!(res.status().is_success());
 
     // Command endpoint should error (no real serial), returning JSON error
-    let res = post_json(&app, "/api/v1/devices/dev2/command", json!({"command": "QID"})).await;
+    let res = post_json(
+        &app,
+        "/api/v1/devices/dev2/command",
+        json!({"command": "QID"}),
+    )
+    .await;
     assert!(res.status().is_client_error() || res.status().is_server_error());
     let body = res.into_body().collect().await.unwrap().to_bytes();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -294,17 +377,27 @@ async fn command_404_and_discovery_empty() {
     let app = test_app(":memory:").await;
 
     // Command to non-existent device should be 404 with error JSON
-    let res = post_json(&app, "/api/v1/devices/does-not-exist/command", json!({"command": "QID"})).await;
+    let res = post_json(
+        &app,
+        "/api/v1/devices/does-not-exist/command",
+        json!({"command": "QID"}),
+    )
+    .await;
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
     let body = res.into_body().collect().await.unwrap().to_bytes();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert!(v.get("error").is_some());
 
     // Discovery with empty serialPorts should return an empty array
-    let res = post_json(&app, "/api/v1/protocols/discovery", json!({
-        "serialPorts": [],
-        "timeoutSeconds": 1
-    })).await;
+    let res = post_json(
+        &app,
+        "/api/v1/protocols/discovery",
+        json!({
+            "serialPorts": [],
+            "timeoutSeconds": 1
+        }),
+    )
+    .await;
     assert!(res.status().is_success());
     let body = res.into_body().collect().await.unwrap().to_bytes();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -347,7 +440,10 @@ async fn import_export_round_trip() {
     let arr = v.as_array().unwrap();
     assert_eq!(arr.len(), 2);
 
-    let mut ids: Vec<String> = arr.iter().map(|x| x["id"].as_str().unwrap().to_string()).collect();
+    let mut ids: Vec<String> = arr
+        .iter()
+        .map(|x| x["id"].as_str().unwrap().to_string())
+        .collect();
     ids.sort();
     assert_eq!(ids, vec!["devA", "devB"]);
 
@@ -409,7 +505,12 @@ async fn mock_command_returns_ok() {
     assert!(res.status().is_success());
 
     // Send command and expect OK
-    let res = post_json(&app, "/api/v1/devices/devCmd/command", json!({"command": "PING"})).await;
+    let res = post_json(
+        &app,
+        "/api/v1/devices/devCmd/command",
+        json!({"command": "PING"}),
+    )
+    .await;
     assert!(res.status().is_success());
     let body = res.into_body().collect().await.unwrap().to_bytes();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -441,8 +542,16 @@ async fn dashboard_includes_latest_data() {
         device_id: cfg.id.clone(),
         timestamp: t1,
         device_type: dto::DeviceType::SolarInverter,
-        metrics: dto::DeviceMetrics { pv_voltage: Some(50.0), ..Default::default() },
-        status: dto::DeviceStatus { is_connected: true, last_seen: t1, health: dto::HealthStatus::Healthy, error_message: None },
+        metrics: dto::DeviceMetrics {
+            pv_voltage: Some(50.0),
+            ..Default::default()
+        },
+        status: dto::DeviceStatus {
+            is_connected: true,
+            last_seen: t1,
+            health: dto::HealthStatus::Healthy,
+            error_message: None,
+        },
         raw_data: None,
     };
     let mut d2 = d1.clone();

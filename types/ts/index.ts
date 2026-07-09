@@ -25,3 +25,9 @@ export type StorageUsageDto = { usedMb: number; totalMb: number; percent: number
 export type SystemStatusDto = { uptimeSeconds: number; version: string; activeDevices: number; activeConnections: number; activeClients: number; dataPointsPerSecond: number; memoryUsage: ResourceUsageDto; cpuUsage: ResourceUsageDto; storageUsage: StorageUsageDto }
 
 export type ErrorResponseDto = { error: string; details: string; timestamp: string }
+
+export type Eg4Command = { type: "writeRegister"; addr: number; value: number } | { type: "writeRegisters"; addr: number; values: number[] } | { type: "writeCoil"; addr: number; value: boolean } | { type: "writeCoils"; addr: number; values: boolean[] } | { type: "setMaxChargeCurrent"; amps: number }
+
+export type DeviceCommandRequest = { protocol: "eg4-6000xp-modbus"; command: Eg4Command }
+
+export type DeviceCommandResponseDto = { ok: boolean; message: string | null }

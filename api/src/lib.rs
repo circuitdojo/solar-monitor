@@ -543,7 +543,7 @@ struct CommandRequest {
 async fn send_device_command(
     axum::extract::State(state): axum::extract::State<Arc<AppState>>,
     axum::extract::Path(id): axum::extract::Path<String>,
-    Json(body): Json<CommandRequest>,
+    Json(raw): Json<serde_json::Value>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let cfg = state
         .store
@@ -551,6 +551,23 @@ async fn send_device_command(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?
         .ok_or_else(|| ApiError::NotFound("device not found".into()))?;
+    if cfg.protocol == "eg4-6000xp-modbus" {
+        let req: contracts::DeviceCommandRequest = serde_json::from_value(raw)
+            .map_err(|e| ApiError::BadRequest(format!("invalid command: {}", e)))?;
+        match req {
+            contracts::DeviceCommandRequest::Eg4_6000xp_Modbus { command } => {
+                solar_monitor_protocols::eg4_6000xp_execute(&cfg, &command)
+                    .await
+                    .map_err(|e| ApiError::Internal(e.to_string()))?;
+                return Ok(Json(serde_json::json!({"ok": true})));
+            }
+        }
+    }
+    // Generic path: forward a raw command string through the protocol driver
+    let command = raw
+        .get("command")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ApiError::BadRequest("missing command".into()))?;
     let proto = state
         .registry
         .get_protocol(&cfg.protocol)
@@ -559,11 +576,11 @@ async fn send_device_command(
         .connect(&cfg)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
-    let resp = conn
-        .send_command(&body.command)
+    let response = conn
+        .send_command(command)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
-    Ok(Json(serde_json::json!({"ok": true, "response": resp })))
+    Ok(Json(serde_json::json!({"ok": true, "response": response})))
 }
 
 #[derive(Deserialize)]
@@ -679,7 +696,7 @@ fn to_dto(c: &core::DeviceConfig) -> contracts::DeviceConfigDto {
 }
 
 #[cfg(feature = "embed-frontend")]
-fn frontend_embed_router() -> Router<Arc<AppState>> {
+fn frontend_embed_router() -> Router {
     use axum::extract::Path;
     use rust_embed::RustEmbed;
 
@@ -687,44 +704,39 @@ fn frontend_embed_router() -> Router<Arc<AppState>> {
     #[folder = "../web/dist/"]
     struct WebAssets;
 
+    fn serve(file_path: &str) -> Option<Response> {
+        let content = WebAssets::get(file_path)?;
+        let mime = mime_guess::from_path(file_path).first_or_octet_stream();
+        Some(
+            (
+                axum::http::StatusCode::OK,
+                [(axum::http::header::CONTENT_TYPE, mime.as_ref())],
+                axum::body::Body::from(content.data),
+            )
+                .into_response(),
+        )
+    }
+
     async fn asset(Path(path): Path<String>) -> Response {
         let file_path = if path.is_empty() {
             "index.html"
         } else {
             path.as_str()
         };
-        if let Some(content) = WebAssets::get(file_path) {
-            let body = axum::body::Full::from(content.data);
-            let mime = mime_guess::from_path(file_path).first_or_octet_stream();
-            return (
-                axum::http::StatusCode::OK,
-                [(axum::http::header::CONTENT_TYPE, mime.as_ref())],
-                body,
-            )
-                .into_response();
-        }
-        if let Some(index) = WebAssets::get("index.html") {
-            let body = axum::body::Full::from(index.data);
-            let mime = mime_guess::from_path("index.html").first_or_octet_stream();
-            return (
-                axum::http::StatusCode::OK,
-                [(axum::http::header::CONTENT_TYPE, mime.as_ref())],
-                body,
-            )
-                .into_response();
-        }
-        axum::http::StatusCode::NOT_FOUND.into_response()
+        serve(file_path)
+            .or_else(|| serve("index.html"))
+            .unwrap_or_else(|| axum::http::StatusCode::NOT_FOUND.into_response())
     }
 
     Router::new()
-        .route("/", get(|| async { asset(Path("".to_string())).await }))
-        .route("/*path", get(asset))
+        .route("/", get(|| async { asset(Path(String::new())).await }))
+        .route("/{*path}", get(asset))
 }
 
 #[cfg(not(feature = "embed-frontend"))]
 fn frontend_fs_router() -> Router {
     use tower_http::services::ServeDir;
-    let service = ServeDir::new("../web/dist");
+    let service = ServeDir::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../web/dist"));
     Router::new().fallback_service(service)
 }
 
