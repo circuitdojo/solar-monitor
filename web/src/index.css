@@ -3,5 +3,47 @@
 @tailwind utilities;
 
 html, body, #app { height: 100%; }
-body { @apply bg-slate-50 text-slate-900; }
+body { background: var(--vz-page); color: var(--vz-ink); }
+
+:root {
+  --vz-page: #f9f9f7;
+  --vz-surface: #fcfcfb;
+  --vz-ink: #0b0b0b;
+  --vz-ink-2: #52514e;
+  --vz-ink-3: #898781;
+  --vz-grid: #e1e0d9;
+  --vz-baseline: #c3c2b7;
+  --vz-border: rgba(11, 11, 11, 0.1);
+  --vz-load: #2a78d6;    /* categorical slot 1 */
+  --vz-batt: #1baf7a;    /* slot 2 */
+  --vz-pv: #eda100;      /* slot 3 */
+  --vz-grid-s: #4a3aa7;  /* slot 5 */
+  --vz-seq: #2a78d6;
+  --vz-batt-track: #d2efe4;
+  --vz-good: #0ca30c;
+  --vz-good-text: #006300;
+  --vz-crit: #d03b3b;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --vz-page: #0d0d0d;
+    --vz-surface: #1a1a19;
+    --vz-ink: #ffffff;
+    --vz-ink-2: #c3c2b7;
+    --vz-ink-3: #898781;
+    --vz-grid: #2c2c2a;
+    --vz-baseline: #383835;
+    --vz-border: rgba(255, 255, 255, 0.1);
+    --vz-load: #3987e5;
+    --vz-batt: #199e70;
+    --vz-pv: #c98500;
+    --vz-grid-s: #9085e9;
+    --vz-seq: #3987e5;
+    --vz-batt-track: #1e3a2f;
+    --vz-good: #0ca30c;
+    --vz-good-text: #0ca30c;
+    --vz-crit: #d03b3b;
+  }
+}
 

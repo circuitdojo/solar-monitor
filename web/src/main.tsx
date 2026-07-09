@@ -3,6 +3,7 @@ import { useEffect, useState } from 'preact/hooks'
 import { Link, Route, Router } from 'wouter'
 import './index.css'
 import { DeviceListItemDto } from '../../types/ts'
+import { DashboardPage } from './dashboard'
 
 function useFetch<T>(url: string) {
   const [data, setData] = useState<T | null>(null)
@@ -65,29 +66,6 @@ function DevicesPage() {
   )
 }
 
-function DashboardPage() {
-  const [messages, setMessages] = useState<string[]>([])
-  useEffect(() => {
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-    const ws = new WebSocket(`${proto}://${location.host}/api/v1/ws`)
-    ws.onmessage = (ev) => setMessages(m => [ev.data, ...m].slice(0, 20))
-    return () => ws.close()
-  }, [])
-  return (
-    <div class="p-6 space-y-4">
-      <div class="flex items-center justify-between">
-        <h1 class="text-xl font-semibold">Dashboard</h1>
-        <Link href="/devices"><a class="text-blue-600 hover:underline">Devices</a></Link>
-      </div>
-      <div class="grid gap-2">
-        {messages.map((m, i) => (
-          <pre class="text-xs bg-slate-100 p-2 rounded overflow-auto" key={i}>{m}</pre>
-        ))}
-      </div>
-    </div>
-  )
-}
-
 function App() {
   return (
     <Router>
@@ -104,10 +82,10 @@ function AddDeviceModal({ onClose, onSaved }: AddDeviceProps) {
   const [serialPorts, setSerialPorts] = useState<string[]>([])
   const [id, setId] = useState('')
   const [name, setName] = useState('')
-  const [deviceType, setDeviceType] = useState<DeviceListItemDto['deviceType']>('SolarInverter')
+  const [deviceType, setDeviceType] = useState<DeviceListItemDto['deviceType']>('solarInverter')
   const [protocolName, setProtocolName] = useState('eg4-6000xp-modbus')
   const [serialPort, setSerialPort] = useState('')
-  const [baudRate, setBaudRate] = useState('9600')
+  const [baudRate, setBaudRate] = useState('19200')
   const [unitId, setUnitId] = useState('1')
   const [pollInterval, setPollInterval] = useState(30)
   const [enabled, setEnabled] = useState(false)
@@ -154,10 +132,10 @@ function AddDeviceModal({ onClose, onSaved }: AddDeviceProps) {
             <div>
               <label class="block text-sm text-slate-600">Device Type</label>
               <select class="w-full border rounded px-2 py-1" value={deviceType} onChange={(e: any) => setDeviceType(e.target.value)}>
-                <option value="SolarInverter">SolarInverter</option>
-                <option value="BatterySystem">BatterySystem</option>
-                <option value="ChargeController">ChargeController</option>
-                <option value="EnergyMeter">EnergyMeter</option>
+                <option value="solarInverter">Solar Inverter</option>
+                <option value="batterySystem">Battery System</option>
+                <option value="chargeController">Charge Controller</option>
+                <option value="energyMeter">Energy Meter</option>
               </select>
             </div>
             <div>
