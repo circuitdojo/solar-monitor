@@ -12,6 +12,9 @@ use solar_monitor_core::{
     DeviceType, DiscoveredDevice, HealthStatus, ProtocolCapabilities, ProtocolMetadata, ScanConfig,
 };
 
+mod eg4_settings;
+pub use eg4_settings::{eg4_6000xp_read_settings, eg4_6000xp_write_setting};
+
 pub fn registered() -> &'static [&'static str] {
     &["eg4-6000xp-modbus", "eg4-pi30-rs485"]
 }
@@ -607,16 +610,10 @@ impl DeviceConnection for Eg4ModbusConn {
         let b3 = self.read_input_registers(80, 40).await?;
         let b4 = self.read_input_registers(120, 40).await?;
         let b5 = self.read_input_registers(160, 40).await?;
-        // Holding reg 77 bit0 = ACInputType: 0 grid, 1 generator. The gen input
-        // registers (121-126) hold junk unless a generator is configured.
-        let ac_input_is_gen = self
-            .handle
-            .read_holding_registers(self.unit_id, 77, 1)
-            .await
-            .map(|r| r.first().map(|v| v & 1 == 1).unwrap_or(false))
-            .unwrap_or(false);
-
         let u16le = |s: &[u8]| -> u16 { u16::from_le_bytes([s[0], s[1]]) };
+        // Input reg 77 bit0 = ACInputType: 0 grid, 1 generator (Table 7). The gen
+        // input registers (121-126) hold junk unless a generator is configured.
+        let ac_input_is_gen = u16le(&b2[74..76]) & 1 == 1;
         let i16le = |s: &[u8]| -> i16 { i16::from_le_bytes([s[0], s[1]]) };
         // b1 indices in bytes
         let vpv1 = u16le(&b1[2..4]) as f64 / 10.0;

@@ -48,6 +48,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     out.push_str(&ts::export::<DeviceCommandRequest>(&conf)?);
     out.push_str("\n\n");
     out.push_str(&ts::export::<DeviceCommandResponseDto>(&conf)?);
+    out.push_str("\n\n");
+    out.push_str(&ts::export::<SettingValueDto>(&conf)?);
+    out.push_str("\n\n");
+    out.push_str(&ts::export::<DeviceSettingDto>(&conf)?);
+    out.push_str("\n\n");
+    out.push_str(&ts::export::<WriteSettingRequestDto>(&conf)?);
 
     let path = out_dir.join("index.ts");
     fs::write(&path, out)?;

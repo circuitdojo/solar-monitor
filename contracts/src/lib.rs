@@ -195,3 +195,46 @@ pub struct DeviceCommandResponseDto {
     pub ok: bool,
     pub message: Option<String>,
 }
+
+// Device settings (typed, validated register-backed configuration)
+
+#[derive(Type, Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum SettingValueDto {
+    #[serde(rename_all = "camelCase")]
+    Number {
+        value: f64,
+        min: f64,
+        max: f64,
+        step: f64,
+        unit: Option<String>,
+    },
+    #[serde(rename_all = "camelCase")]
+    Toggle { enabled: bool },
+    #[serde(rename_all = "camelCase")]
+    Choice {
+        value: u16,
+        options: Vec<u16>,
+        unit: Option<String>,
+    },
+    /// Times as "HH:MM"
+    #[serde(rename_all = "camelCase")]
+    TimeWindow { start: String, end: String },
+}
+
+#[derive(Type, Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceSettingDto {
+    pub key: String,
+    pub label: String,
+    pub group: String,
+    pub setting: SettingValueDto,
+}
+
+#[derive(Type, Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WriteSettingRequestDto {
+    /// New value, stringly typed: a number for Number/Choice, "true"/"false"
+    /// for Toggle, "HH:MM-HH:MM" for TimeWindow.
+    pub value: String,
+}

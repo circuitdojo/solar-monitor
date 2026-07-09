@@ -430,7 +430,10 @@ export function DashboardPage() {
           </span>
           {latest && <span class="text-xs" style={{ color: 'var(--vz-ink-3)' }}>updated {new Date(latest.t).toLocaleTimeString()}</span>}
         </div>
-        <Link href="/devices"><a class="text-sm hover:underline" style={{ color: 'var(--vz-load)' }}>Devices</a></Link>
+        <div class="flex items-center gap-4">
+          <Link href="/settings"><a class="text-sm hover:underline" style={{ color: 'var(--vz-load)' }}>Settings</a></Link>
+          <Link href="/devices"><a class="text-sm hover:underline" style={{ color: 'var(--vz-load)' }}>Devices</a></Link>
+        </div>
       </div>
 
       {error && <Card><div style={{ color: 'var(--vz-crit)' }}>Error: {error}</div></Card>}

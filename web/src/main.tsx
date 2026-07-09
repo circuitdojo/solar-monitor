@@ -4,6 +4,7 @@ import { Link, Route, Router } from 'wouter'
 import './index.css'
 import { DeviceListItemDto } from '../../types/ts'
 import { DashboardPage } from './dashboard'
+import { SettingsPage } from './settings'
 
 function DevicesPage() {
   const [devices, setDevices] = useState<DeviceListItemDto[] | null>(null)
@@ -83,6 +84,7 @@ function App() {
     <Router>
       <Route path="/" component={DashboardPage} />
       <Route path="/devices" component={DevicesPage} />
+      <Route path="/settings" component={SettingsPage} />
     </Router>
   )
 }

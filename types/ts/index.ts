@@ -31,3 +31,9 @@ export type Eg4Command = { type: "writeRegister"; addr: number; value: number } 
 export type DeviceCommandRequest = { protocol: "eg4-6000xp-modbus"; command: Eg4Command }
 
 export type DeviceCommandResponseDto = { ok: boolean; message: string | null }
+
+export type SettingValueDto = { kind: "number"; value: number; min: number; max: number; step: number; unit: string | null } | { kind: "toggle"; enabled: boolean } | { kind: "choice"; value: number; options: number[]; unit: string | null } | { kind: "timeWindow"; start: string; end: string }
+
+export type DeviceSettingDto = { key: string; label: string; group: string; setting: SettingValueDto }
+
+export type WriteSettingRequestDto = { value: string }

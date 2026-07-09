@@ -75,6 +75,11 @@ pub fn router(state: Arc<AppState>) -> Router {
             get(get_device).put(update_device).delete(remove_device),
         )
         .route("/api/v1/devices/{id}/command", post(send_device_command))
+        .route("/api/v1/devices/{id}/settings", get(get_device_settings))
+        .route(
+            "/api/v1/devices/{id}/settings/{key}",
+            axum::routing::put(write_device_setting),
+        )
         .route("/api/v1/devices/{id}/data", get(get_device_data_range))
         .route("/api/v1/devices/{id}/data/latest", get(get_latest_data))
         .route("/api/v1/devices/export", get(export_devices))
@@ -581,6 +586,48 @@ async fn send_device_command(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
     Ok(Json(serde_json::json!({"ok": true, "response": response})))
+}
+
+async fn settings_device_config(
+    state: &AppState,
+    id: &str,
+) -> Result<core::DeviceConfig, ApiError> {
+    let cfg = state
+        .store
+        .get_device_config(id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or_else(|| ApiError::NotFound("device not found".into()))?;
+    if cfg.protocol != "eg4-6000xp-modbus" {
+        return Err(ApiError::BadRequest(format!(
+            "settings not supported for protocol '{}'",
+            cfg.protocol
+        )));
+    }
+    Ok(cfg)
+}
+
+async fn get_device_settings(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> ApiResult<Json<Vec<contracts::DeviceSettingDto>>> {
+    let cfg = settings_device_config(&state, &id).await?;
+    let settings = solar_monitor_protocols::eg4_6000xp_read_settings(&cfg)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(Json(settings))
+}
+
+async fn write_device_setting(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+    axum::extract::Path((id, key)): axum::extract::Path<(String, String)>,
+    Json(req): Json<contracts::WriteSettingRequestDto>,
+) -> ApiResult<Json<contracts::DeviceSettingDto>> {
+    let cfg = settings_device_config(&state, &id).await?;
+    let setting = solar_monitor_protocols::eg4_6000xp_write_setting(&cfg, &key, &req.value)
+        .await
+        .map_err(|e| ApiError::BadRequest(e.to_string()))?;
+    Ok(Json(setting))
 }
 
 #[derive(Deserialize)]
