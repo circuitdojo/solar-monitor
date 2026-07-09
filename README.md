@@ -93,7 +93,9 @@ Wiring notes (learned the hard way):
 
 ## Inverter Configuration
 
-`/settings` exposes a curated set of EG4 6000XP settings (charge/discharge power and current limits, charge voltage, AC-charge enable/power/SOC limit/time windows, discharge cut-off SOC and voltage, backup output voltage/frequency). Every value shown is read from the inverter; every write is range-checked against the official LuxPower hold-register limits, written with function 0x06, then read back — the UI shows what the inverter actually stored.
+`/settings` exposes a curated set of EG4 6000XP settings (charge/discharge power and current limits, charge voltage, AC-charge enable/power/SOC limit/time windows, discharge cut-off SOC and voltage, generator charging, backup output voltage/frequency). Every value shown is read from the inverter; every write is range-checked against the official LuxPower hold-register limits, written with function 0x06, then read back — the UI shows what the inverter actually stored.
+
+Generator charging (hold regs 194–198 plus the mode bit at reg 120 bit7) is configured independently of whether a generator is present: the start/end **SOC** pair applies when charge control is "By SOC", the start/end **voltage** pair when "By voltage" — the inverter ignores the inactive pair. The AC input *type* (grid vs generator, input reg 77 bit0) is reported on the dashboard but intentionally not writable here.
 
 API:
 
