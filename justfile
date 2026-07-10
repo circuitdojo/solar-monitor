@@ -1,7 +1,13 @@
 # Solar Monitor task runner — `just --list` for an overview.
+#
+# Machine-specific values (your Pi's host/user) go in a gitignored .env:
+#   SOLAR_PI=user@your-pi.local
+#   SOLAR_PI_URL=http://your-pi.local:8080
 
-pi := "pi@solar-pi.local"
-pi_url := "http://solar-pi.local:8080"
+set dotenv-load
+
+pi := env_var_or_default("SOLAR_PI", "pi@solar-pi.local")
+pi_url := env_var_or_default("SOLAR_PI_URL", "http://solar-pi.local:8080")
 
 # List available recipes
 default:

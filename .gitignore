@@ -4,3 +4,6 @@ node_modules
 target
 test-output
 .venv
+.env
+# Vendor documentation is referenced but not redistributed
+docs/*.pdf

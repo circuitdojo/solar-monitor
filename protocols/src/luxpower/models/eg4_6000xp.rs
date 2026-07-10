@@ -1,7 +1,9 @@
-//! EG4 6000XP: LuxPower register map, sourced from the official document at
-//! `docs/6kXP-Modbus-2023.10.28.pdf` (Table 8, hold registers). Every setting
-//! cites a documented register and range; registers without a documented
-//! range are deliberately excluded.
+//! EG4 6000XP: LuxPower register map, sourced from the official vendor
+//! document "6kXP-Modbus updated on 2023.10.28" (Table 8, hold registers).
+//! The PDF is vendor-copyrighted and not redistributed — obtain it from
+//! EG4/LuxPower and place it at `docs/6kXP-Modbus-2023.10.28.pdf`
+//! (gitignored). Every setting cites a documented register and range;
+//! registers without a documented range are deliberately excluded.
 //!
 //! The Modbus RTU interface is the dongle port: 19200 baud 8N1, unit 1,
 //! plain standard Modbus RTU. See CLAUDE.md for the hard-won bus notes.

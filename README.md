@@ -77,28 +77,35 @@ sysroot produces `for FreeBSD 15.0` binaries; check with `file`).
 
 `just deploy` does all of the below (frontend build → embed cross-build → scp → restart → health check) and refuses to ship a binary without the embedded UI. The manual steps:
 
-The production Pi is `pi@solar-pi.local` (Debian Bookworm, aarch64, key-only SSH — note the username). The RS485 adapter is `/dev/ttyUSB0`.
+Set your Pi's address once in a gitignored `.env` at the repo root (the justfile reads it):
 
 ```sh
-scp target/aarch64-unknown-linux-gnu/release/solar-monitor pi@solar-pi.local:/tmp/
-ssh pi@solar-pi.local 'sudo install -m755 /tmp/solar-monitor /usr/local/bin/ && sudo systemctl restart solar-monitor'
+SOLAR_PI=pi@solar-pi.local
+SOLAR_PI_URL=http://solar-pi.local:8080
+```
+
+The examples below assume a Debian Bookworm aarch64 Pi with the RS485 adapter on `/dev/ttyUSB0`.
+
+```sh
+scp target/aarch64-unknown-linux-gnu/release/solar-monitor $SOLAR_PI:/tmp/
+ssh $SOLAR_PI 'sudo install -m755 /tmp/solar-monitor /usr/local/bin/ && sudo systemctl restart solar-monitor'
 ```
 
 The service is defined in `/etc/systemd/system/solar-monitor.service`:
 
 - `ExecStart=/usr/local/bin/solar-monitor --serve --bind 0.0.0.0 --port 8080 --db /var/lib/solar-monitor/solar.db`
-- `User=inverter` with `SupplementaryGroups=dialout` (serial port access)
+- A dedicated `User=` with `SupplementaryGroups=dialout` (serial port access)
 - `StateDirectory=solar-monitor` provides the DB directory
 - Hardening: `ProtectHome=true`, `ProtectSystem=full`, `PrivateTmp=true`. The binary must live outside `/home` (e.g. `/usr/local/bin`) or `ProtectHome` prevents systemd from executing it — this has bitten before.
 
 Check on it with:
 
 ```sh
-ssh pi@solar-pi.local systemctl status solar-monitor
-curl http://solar-pi.local:8080/api/v1/health
+ssh $SOLAR_PI systemctl status solar-monitor
+curl $SOLAR_PI_URL/api/v1/health
 ```
 
-Dashboard: http://solar-pi.local:8080
+Dashboard: `$SOLAR_PI_URL`
 
 For a first-time install on a new host, the binary can generate and install the unit itself: `solar-monitor --install` (see `--help` for `--user`, `--data-dir`, `--service-name`).
 
@@ -107,7 +114,7 @@ For a first-time install on a new host, the binary can generate and install the 
 Probe for inverters on the Pi (stop the service first if it is actively polling the same port):
 
 ```sh
-ssh pi@solar-pi.local '/usr/local/bin/solar-monitor --discover --serial-ports /dev/ttyUSB0 --timeout 5'
+ssh $SOLAR_PI '/usr/local/bin/solar-monitor --discover --serial-ports /dev/ttyUSB0 --timeout 5'
 ```
 
 Discovery probes Modbus RTU unit IDs 1–3 at 19200 then 9600 baud. Devices can also be added manually in the web UI (Devices → Add).
@@ -158,3 +165,14 @@ The settings table lives in `protocols/src/eg4_settings.rs` — one table entry 
 cargo fmt
 cargo clippy --workspace --all-features
 ```
+
+## License
+
+GPL-3.0-or-later — see [LICENSE](LICENSE).
+
+The EG4/LuxPower Modbus register documentation this project was built against
+("6kXP-Modbus updated on 2023.10.28") is vendor-copyrighted and **not**
+redistributed here. The settings table in
+`protocols/src/luxpower/models/eg4_6000xp.rs` cites its registers and
+documented ranges; obtain the PDF from EG4/LuxPower support if you need the
+primary source, and drop it at `docs/6kXP-Modbus-2023.10.28.pdf` (gitignored).
