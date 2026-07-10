@@ -41,6 +41,38 @@ CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
 
 No sysroot or `pkg-config` setup is needed: the `serialport` dependency is used with `default-features = false`, which drops the libudev native dependency (port enumeration falls back to sysfs on Linux — you lose only USB VID/PID metadata in listings). Keep it that way; re-enabling default features breaks cross-compilation.
 
+## Building for FreeBSD (x86_64)
+
+Unlike the Pi build, FreeBSD cross-linking **does** need a sysroot: rustup only
+ships the Rust std rlibs, and the final link pulls in FreeBSD system libraries
+(`libexecinfo` for backtraces; `libkvm`/`libmemstat`/`libprocstat`/`libdevstat`
+for `sysinfo`) plus FreeBSD's `crt1.o` — none of which a Linux `cc`/`ld` has.
+
+One-time setup (needs `clang` and `lld` on the build machine):
+
+```sh
+rustup target add x86_64-unknown-freebsd
+# Sysroot from the official base tarball — match the target's major version
+mkdir -p ~/toolchains/freebsd15-sysroot
+curl -fLO https://download.freebsd.org/releases/amd64/15.0-RELEASE/base.txz
+tar -xf base.txz -C ~/toolchains/freebsd15-sysroot ./lib ./usr/lib ./usr/include ./usr/libdata
+```
+
+`.cargo/config.toml` points the `x86_64-unknown-freebsd` target at
+`clang --sysroot=~/toolchains/freebsd15-sysroot -fuse-ld=lld`, and sets
+`CC`/`CFLAGS` for that target so C dependencies (bundled SQLite) compile
+against the FreeBSD headers. If the sysroot lives elsewhere, update the paths
+there. Then:
+
+```sh
+cd web && npm run build && cd ..
+cargo build --release --target x86_64-unknown-freebsd \
+  -p solar-monitor --features solar-monitor-api/embed-frontend
+```
+
+The sysroot's major version must match the machine you deploy to (a 15.0
+sysroot produces `for FreeBSD 15.0` binaries; check with `file`).
+
 ## Deploying
 
 The production Pi is `pi@solar-pi.local` (Debian Bookworm, aarch64, key-only SSH — note the username). The RS485 adapter is `/dev/ttyUSB0`.

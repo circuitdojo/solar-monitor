@@ -1,0 +1,23 @@
+# Cross-compilation linkers.
+#
+# FreeBSD: rustup only ships std rlibs; linking needs clang/lld plus a real
+# FreeBSD sysroot (libc, libexecinfo, libkvm/devstat for sysinfo, crt1.o).
+# Build one from the official base.txz — see README "Building for FreeBSD".
+
+[target.x86_64-unknown-freebsd]
+linker = "clang"
+rustflags = [
+    "-C", "link-arg=--target=x86_64-unknown-freebsd",
+    "-C", "link-arg=--sysroot=/home/jared/toolchains/freebsd15-sysroot",
+    "-C", "link-arg=-fuse-ld=lld",
+]
+
+[target.aarch64-unknown-linux-gnu]
+linker = "aarch64-linux-gnu-gcc"
+
+# C dependencies (e.g. bundled SQLite from libsqlite3-sys) must also be
+# cross-compiled against the FreeBSD headers.
+[env]
+CC_x86_64_unknown_freebsd = "clang"
+CFLAGS_x86_64_unknown_freebsd = "--target=x86_64-unknown-freebsd --sysroot=/home/jared/toolchains/freebsd15-sysroot"
+AR_x86_64_unknown_freebsd = "llvm-ar"
