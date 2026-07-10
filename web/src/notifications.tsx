@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'preact/hooks'
 import {
-  NotificationChannelDto, NotificationChannelKind, NotificationEvent, NotificationRuleDto,
+  NotificationChannelDto, NotificationChannelKind, NotificationEvent, NotificationLogEntryDto, NotificationRuleDto,
 } from '../../types/ts'
 import { useDevices } from './device-select'
 import { PageShell, PageTitle } from './layout'
@@ -89,6 +89,7 @@ function EnabledBadge({ on }: { on: boolean }) {
 export function NotificationsPage() {
   const [channels, setChannels] = useState<NotificationChannelDto[] | null>(null)
   const [rules, setRules] = useState<NotificationRuleDto[] | null>(null)
+  const [log, setLog] = useState<NotificationLogEntryDto[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [editChannel, setEditChannel] = useState<NotificationChannelDto | 'new' | null>(null)
   const [editRule, setEditRule] = useState<NotificationRuleDto | 'new' | null>(null)
@@ -100,8 +101,9 @@ export function NotificationsPage() {
     Promise.all([
       fetch('/api/v1/notifications/channels').then(r => (r.ok ? r.json() : Promise.reject(r.statusText))),
       fetch('/api/v1/notifications/rules').then(r => (r.ok ? r.json() : Promise.reject(r.statusText))),
+      fetch('/api/v1/notifications/log?limit=50').then(r => (r.ok ? r.json() : Promise.reject(r.statusText))),
     ])
-      .then(([cs, rs]) => { if (!cancelled) { setChannels(cs); setRules(rs) } })
+      .then(([cs, rs, ls]) => { if (!cancelled) { setChannels(cs); setRules(rs); setLog(ls) } })
       .catch(e => { if (!cancelled) setError(String(e)) })
     return () => { cancelled = true }
   }, [refreshKey])
@@ -176,6 +178,39 @@ export function NotificationsPage() {
           </div>
         ))}
       </div>
+
+      <div class="flex items-center justify-between pt-2">
+        <span class="text-sm font-medium" style={{ color: 'var(--vz-ink-2)' }}>History</span>
+        <button class="vz-btn vz-btn-ghost" onClick={reload}>Refresh</button>
+      </div>
+      {log && log.length === 0 && (
+        <div class="vz-card p-4" style={{ color: 'var(--vz-ink-2)' }}>Nothing sent yet.</div>
+      )}
+      {log && log.length > 0 && (
+        <div class="vz-card p-2">
+          {log.map(e => (
+            <div class="px-2 py-2 flex items-start justify-between gap-4 flex-wrap" style={{ borderTop: '1px solid var(--vz-border)' }}>
+              <div class="min-w-0">
+                <div class="text-sm flex items-center gap-2" style={{ color: 'var(--vz-ink)' }}>
+                  <span
+                    class="inline-block rounded-full shrink-0"
+                    style={{ width: '7px', height: '7px', background: e.ok ? 'var(--vz-good)' : 'var(--vz-crit)' }}
+                  />
+                  {e.title}
+                </div>
+                <div class="text-xs mt-0.5" style={{ color: 'var(--vz-ink-3)' }}>
+                  {e.body}
+                  {!e.ok && e.error && <span style={{ color: 'var(--vz-crit)' }}> — {e.error}</span>}
+                </div>
+              </div>
+              <div class="text-xs text-right shrink-0" style={{ color: 'var(--vz-ink-3)' }}>
+                <div>{new Date(e.timestamp).toLocaleString()}</div>
+                <div>via {e.channelName}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {editChannel && (
         <ChannelModal

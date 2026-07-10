@@ -245,6 +245,22 @@ pub struct NotificationRuleDto {
     pub cooldown_seconds: u32,
 }
 
+#[derive(Type, Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationLogEntryDto {
+    pub id: i64,
+    pub timestamp: DateTime<Utc>,
+    pub rule_id: String,
+    pub rule_name: String,
+    pub device_id: Option<String>,
+    pub title: String,
+    pub body: String,
+    pub channel_id: String,
+    pub channel_name: String,
+    pub ok: bool,
+    pub error: Option<String>,
+}
+
 // Device settings (typed, validated register-backed configuration)
 
 #[derive(Type, Debug, Clone, Serialize, Deserialize)]

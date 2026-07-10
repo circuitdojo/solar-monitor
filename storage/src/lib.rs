@@ -341,6 +341,72 @@ impl DataStore {
             .await?;
         Ok(())
     }
+
+    // Notification delivery log
+
+    /// Retention cap: newest rows kept, oldest pruned on insert.
+    const NOTIFICATION_LOG_CAP: i64 = 1000;
+
+    pub async fn append_notification_log(
+        &self,
+        entry: &contracts::NotificationLogEntryDto,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO notification_log
+                (timestamp, rule_id, rule_name, device_id, title, body,
+                 channel_id, channel_name, ok, error)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(entry.timestamp)
+        .bind(&entry.rule_id)
+        .bind(&entry.rule_name)
+        .bind(&entry.device_id)
+        .bind(&entry.title)
+        .bind(&entry.body)
+        .bind(&entry.channel_id)
+        .bind(&entry.channel_name)
+        .bind(entry.ok as i32)
+        .bind(&entry.error)
+        .execute(&self.pool)
+        .await?;
+        sqlx::query(
+            "DELETE FROM notification_log WHERE id NOT IN
+             (SELECT id FROM notification_log ORDER BY id DESC LIMIT ?)",
+        )
+        .bind(Self::NOTIFICATION_LOG_CAP)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn list_notification_log(
+        &self,
+        limit: u32,
+    ) -> Result<Vec<contracts::NotificationLogEntryDto>> {
+        use sqlx::Row;
+        let rows = sqlx::query("SELECT * FROM notification_log ORDER BY id DESC LIMIT ?")
+            .bind(limit.min(1000) as i64)
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| contracts::NotificationLogEntryDto {
+                id: r.get("id"),
+                timestamp: r.get("timestamp"),
+                rule_id: r.get("rule_id"),
+                rule_name: r.get("rule_name"),
+                device_id: r.get("device_id"),
+                title: r.get("title"),
+                body: r.get("body"),
+                channel_id: r.get("channel_id"),
+                channel_name: r.get("channel_name"),
+                ok: r.get::<i64, _>("ok") != 0,
+                error: r.get("error"),
+            })
+            .collect())
+    }
 }
 
 /// Store serde-renamed enums as their bare JSON string (e.g. "gridState").

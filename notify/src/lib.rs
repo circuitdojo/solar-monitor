@@ -136,7 +136,8 @@ impl Notifier {
             };
             if let Some(t) = outcome {
                 if self.cooldown_ok(rule, &data.device_id, t.triggered).await {
-                    self.dispatch(rule, channels, &t).await;
+                    self.dispatch(rule, channels, &t, Some(&data.device_id))
+                        .await;
                 }
             }
         }
@@ -227,7 +228,7 @@ impl Notifier {
                         ),
                     };
                     if self.cooldown_ok(rule, &device_id, true).await {
-                        self.dispatch(rule, channels, &t).await;
+                        self.dispatch(rule, channels, &t, Some(&device_id)).await;
                     }
                 }
             }
@@ -239,6 +240,7 @@ impl Notifier {
         rule: &NotificationRuleDto,
         channels: &[NotificationChannelDto],
         t: &Transition,
+        device_id: Option<&str>,
     ) {
         let note = Notification {
             title: t.title.clone(),
@@ -248,15 +250,31 @@ impl Notifier {
             .iter()
             .filter(|c| c.enabled && rule.channel_ids.contains(&c.id))
         {
-            if let Err(e) = channels::send(&self.http, ch, &note).await {
-                tracing::warn!(
+            let result = channels::send(&self.http, ch, &note).await;
+            match &result {
+                Err(e) => tracing::warn!(
                     "notification '{}' via channel '{}' failed: {}",
                     rule.name,
                     ch.name,
                     e
-                );
-            } else {
-                tracing::info!("notification '{}' sent via '{}'", rule.name, ch.name);
+                ),
+                Ok(()) => tracing::info!("notification '{}' sent via '{}'", rule.name, ch.name),
+            }
+            let entry = contracts::NotificationLogEntryDto {
+                id: 0, // assigned by the database
+                timestamp: chrono::Utc::now(),
+                rule_id: rule.id.clone(),
+                rule_name: rule.name.clone(),
+                device_id: device_id.map(|s| s.to_string()),
+                title: note.title.clone(),
+                body: note.body.clone(),
+                channel_id: ch.id.clone(),
+                channel_name: ch.name.clone(),
+                ok: result.is_ok(),
+                error: result.err().map(|e| e.to_string()),
+            };
+            if let Err(e) = self.store.append_notification_log(&entry).await {
+                tracing::warn!("failed to record notification log entry: {}", e);
             }
         }
     }

@@ -105,6 +105,7 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/api/v1/notifications/rules/{id}",
             axum::routing::delete(delete_notification_rule),
         )
+        .route("/api/v1/notifications/log", get(notification_log))
         .with_state(state.clone());
 
     #[cfg(feature = "embed-frontend")]
@@ -837,6 +838,24 @@ async fn delete_notification_rule(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
     Ok(Json(serde_json::json!({"status": "removed", "id": id})))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LogQuery {
+    limit: Option<u32>,
+}
+
+async fn notification_log(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+    axum::extract::Query(q): axum::extract::Query<LogQuery>,
+) -> ApiResult<Json<Vec<contracts::NotificationLogEntryDto>>> {
+    let entries = state
+        .store
+        .list_notification_log(q.limit.unwrap_or(100))
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(Json(entries))
 }
 
 #[cfg(feature = "embed-frontend")]
