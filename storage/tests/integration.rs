@@ -66,3 +66,91 @@ async fn storage_round_trip() {
     assert_eq!(got.device_id, "dev1");
     assert_eq!(got.metrics.pv_voltage, Some(100.0));
 }
+
+#[tokio::test]
+async fn downsampling_aggregates_and_prunes() {
+    let store = DataStore::new(":memory:").await.expect("init store");
+
+    let sample = |ts: chrono::DateTime<Utc>, pv: f64, gen_w: Option<f64>| dto::DeviceData {
+        device_id: "dev1".into(),
+        timestamp: ts,
+        device_type: dto::DeviceType::SolarInverter,
+        metrics: dto::DeviceMetrics {
+            pv_power_watts: Some(pv),
+            operating_mode: Some("Normal".into()),
+            custom_metrics: gen_w
+                .map(|g| std::collections::HashMap::from([("gen_power".to_string(), g)]))
+                .unwrap_or_default(),
+            ..Default::default()
+        },
+        status: dto::DeviceStatus {
+            is_connected: true,
+            last_seen: ts,
+            health: dto::HealthStatus::Healthy,
+            error_message: None,
+        },
+        raw_data: None,
+    };
+
+    // Three samples in one hour bucket, 3 days old; gen_power intermittent
+    let old_hour = (Utc::now() - chrono::Duration::days(3))
+        .date_naive()
+        .and_hms_opt(10, 0, 0)
+        .unwrap()
+        .and_utc();
+    for (offset_min, pv, gen_w) in [
+        (5, 100.0, Some(500.0)),
+        (25, 200.0, None),
+        (45, 300.0, Some(1500.0)),
+    ] {
+        store
+            .store_device_data(&sample(
+                old_hour + chrono::Duration::minutes(offset_min),
+                pv,
+                gen_w,
+            ))
+            .await
+            .unwrap();
+    }
+    // A fresh sample that must survive at full resolution
+    let fresh_ts = Utc::now();
+    store
+        .store_device_data(&sample(fresh_ts, 999.0, None))
+        .await
+        .unwrap();
+
+    let (pruned, hours) = store.downsample_and_prune(1).await.unwrap();
+    assert_eq!(pruned, 3, "old rows folded");
+    assert_eq!(hours, 1, "one hourly bucket written");
+
+    // Second run is a no-op
+    let (pruned2, _) = store.downsample_and_prune(1).await.unwrap();
+    assert_eq!(pruned2, 0);
+
+    // Range query merges: one hourly point (avg) + one fresh raw point
+    let all = store
+        .get_device_data_range(
+            "dev1",
+            old_hour - chrono::Duration::hours(1),
+            Utc::now(),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(all.len(), 2);
+    let hourly = &all[0];
+    assert_eq!(hourly.timestamp, old_hour);
+    assert_eq!(
+        hourly.metrics.pv_power_watts,
+        Some(200.0),
+        "avg of 100/200/300"
+    );
+    assert_eq!(
+        hourly.metrics.custom_metrics.get("gen_power"),
+        Some(&1000.0),
+        "avg over the samples where gen_power was present"
+    );
+    assert_eq!(hourly.metrics.operating_mode.as_deref(), Some("Normal"));
+    let fresh = &all[1];
+    assert_eq!(fresh.metrics.pv_power_watts, Some(999.0));
+}

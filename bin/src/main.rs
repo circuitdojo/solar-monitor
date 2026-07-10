@@ -58,6 +58,11 @@ struct Cli {
     /// Config directory (unused by default, reserved for future)
     #[arg(long)]
     config_dir: Option<String>,
+
+    /// Days of full-resolution history to keep; older readings are
+    /// downsampled to hourly avg/min/max. 0 disables downsampling.
+    #[arg(long, default_value_t = 30)]
+    retention_days: u32,
 }
 
 #[tokio::main]
@@ -171,6 +176,30 @@ async fn main() -> Result<()> {
                 );
             }
         }
+    }
+
+    // Periodic downsampling: fold full-resolution rows older than the
+    // retention window into hourly aggregates (runs at startup, then every 6h)
+    if cli.retention_days > 0 {
+        let store = state.store.clone();
+        let days = cli.retention_days;
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(std::time::Duration::from_secs(6 * 3600));
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                tick.tick().await;
+                match store.downsample_and_prune(days).await {
+                    Ok((0, _)) => {}
+                    Ok((rows, hours)) => tracing::info!(
+                        "downsampled {} readings into {} hourly rows (>{} days old)",
+                        rows,
+                        hours,
+                        days
+                    ),
+                    Err(e) => tracing::warn!("downsampling failed: {}", e),
+                }
+            }
+        });
     }
 
     let app = {
