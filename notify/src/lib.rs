@@ -12,9 +12,9 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use contracts::{DeviceData, NotificationChannelDto, NotificationRuleDto};
 use solar_monitor_storage::DataStore;
-use tokio::sync::{broadcast, Mutex, RwLock};
+use tokio::sync::{Mutex, RwLock, broadcast};
 
-use events::{evaluate, Transition};
+use events::{Transition, evaluate};
 
 pub struct Notification {
     pub title: String,
@@ -107,10 +107,10 @@ impl Notifier {
 
         let (channels, rules) = &*self.config.read().await;
         for rule in rules.iter().filter(|r| r.enabled) {
-            if let Some(dev) = &rule.device_id {
-                if dev != &data.device_id {
-                    continue;
-                }
+            if let Some(dev) = &rule.device_id
+                && dev != &data.device_id
+            {
+                continue;
             }
             let outcome = match rule.event {
                 contracts::NotificationEvent::DeviceOffline => {
@@ -134,11 +134,11 @@ impl Notifier {
                     }
                 }
             };
-            if let Some(t) = outcome {
-                if self.cooldown_ok(rule, &data.device_id, t.triggered).await {
-                    self.dispatch(rule, channels, &t, Some(&data.device_id))
-                        .await;
-                }
+            if let Some(t) = outcome
+                && self.cooldown_ok(rule, &data.device_id, t.triggered).await
+            {
+                self.dispatch(rule, channels, &t, Some(&data.device_id))
+                    .await;
             }
         }
     }
@@ -163,11 +163,7 @@ impl Notifier {
             Some(prev) => prev != active,
         };
         st.active = Some(active);
-        if fire {
-            transition
-        } else {
-            None
-        }
+        if fire { transition } else { None }
     }
 
     async fn cooldown_ok(&self, rule: &NotificationRuleDto, device_id: &str, dir: bool) -> bool {
@@ -178,10 +174,10 @@ impl Notifier {
             last_fired: HashMap::new(),
         });
         let cool = Duration::from_secs(rule.cooldown_seconds as u64);
-        if let Some(prev) = st.last_fired.get(&dir) {
-            if prev.elapsed() < cool {
-                return false;
-            }
+        if let Some(prev) = st.last_fired.get(&dir)
+            && prev.elapsed() < cool
+        {
+            return false;
         }
         st.last_fired.insert(dir, Instant::now());
         true

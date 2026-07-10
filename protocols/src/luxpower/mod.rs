@@ -12,7 +12,7 @@
 pub mod models;
 pub mod settings;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -23,7 +23,7 @@ use solar_monitor_core::{
     SettingsAccess,
 };
 
-use crate::transport::modbus_rtu::{get_or_spawn_port_actor, PortHandle};
+use crate::transport::modbus_rtu::{PortHandle, get_or_spawn_port_actor};
 use settings::{LuxPowerSettings, SettingDef};
 
 /// Five aligned 40-register input blocks (regs 0-199), as little-endian bytes

@@ -5,7 +5,7 @@
 //! documented limits and read back to confirm. Raw register writes are never
 //! exposed.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use std::sync::Arc;
 

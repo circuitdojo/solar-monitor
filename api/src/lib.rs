@@ -3,8 +3,8 @@
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
-use axum::{http::StatusCode, response::Response};
 use axum::{Json, Router};
+use axum::{http::StatusCode, response::Response};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -150,9 +150,8 @@ async fn handle_ws(state: Arc<AppState>, mut socket: WebSocket) {
                 match msg {
                     Ok(data) => {
                         let env = WsEnvelope { message_type: "device_data", timestamp: Utc::now().to_rfc3339(), data };
-                        if let Ok(text) = serde_json::to_string(&env) {
-                            if socket.send(Message::Text(text.into())).await.is_err() { break; }
-                        }
+                        if let Ok(text) = serde_json::to_string(&env)
+                            && socket.send(Message::Text(text.into())).await.is_err() { break; }
                     }
                     Err(_) => break,
                 }

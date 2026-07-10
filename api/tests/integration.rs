@@ -1,4 +1,4 @@
-use axum::{http::Request, Router};
+use axum::{Router, http::Request};
 use http_body_util::BodyExt;
 use tower::ServiceExt; // for `oneshot` // for `collect`
 
@@ -680,10 +680,12 @@ async fn settings_unsupported_by_protocol_returns_400() {
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
     let body = res.into_body().collect().await.unwrap().to_bytes();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert!(v["details"]
-        .as_str()
-        .unwrap()
-        .contains("settings not supported"));
+    assert!(
+        v["details"]
+            .as_str()
+            .unwrap()
+            .contains("settings not supported")
+    );
 }
 
 #[tokio::test]

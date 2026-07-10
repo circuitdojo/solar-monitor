@@ -141,7 +141,7 @@ async fn run_port_actor(
     timeout_secs: u64,
     mut rx: tokio::sync::mpsc::Receiver<PortRequest>,
 ) {
-    use tokio::time::{timeout, Duration};
+    use tokio::time::{Duration, timeout};
     use tokio_modbus::prelude::rtu;
     use tokio_modbus::prelude::*;
     use tokio_serial::{DataBits, Parity, SerialStream, StopBits};

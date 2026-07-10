@@ -4,8 +4,8 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 use contracts::{DeviceData, DeviceMetrics, DeviceStatus, DeviceType, HealthStatus};
 use solar_monitor_core::DeviceConfig;
-use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::SqlitePool;
+use sqlx::sqlite::SqlitePoolOptions;
 
 pub struct DataStore {
     pool: SqlitePool,
@@ -14,10 +14,10 @@ pub struct DataStore {
 impl DataStore {
     pub async fn new(database_path: &str) -> Result<Self> {
         // Ensure parent directory exists (best-effort)
-        if let Some(parent) = std::path::Path::new(database_path).parent() {
-            if !parent.as_os_str().is_empty() {
-                let _ = std::fs::create_dir_all(parent);
-            }
+        if let Some(parent) = std::path::Path::new(database_path).parent()
+            && !parent.as_os_str().is_empty()
+        {
+            let _ = std::fs::create_dir_all(parent);
         }
 
         // Build connection URL.

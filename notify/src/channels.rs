@@ -1,7 +1,7 @@
 //! Channel senders. Each takes the kind-specific config map from the DTO;
 //! missing required keys are hard errors surfaced to the caller/test button.
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use contracts::{NotificationChannelDto, NotificationChannelKind};
 
 use crate::Notification;

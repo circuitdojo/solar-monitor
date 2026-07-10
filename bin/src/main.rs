@@ -219,7 +219,9 @@ fn install_service(cli: &Cli) -> Result<()> {
             Err(e) => {
                 anyhow::bail!(
                     "binary is at {} (under /home, blocked by ProtectHome) and copying to {} failed: {}.\nRe-run with sudo, or install the binary outside /home first.",
-                    exe.display(), target, e
+                    exe.display(),
+                    target,
+                    e
                 );
             }
         }
@@ -280,7 +282,10 @@ fn install_service(cli: &Cli) -> Result<()> {
         Ok(mut f) => {
             f.write_all(unit.as_bytes())?;
             println!("Installed service at {}", systemd_path.display());
-            println!("Next steps:\n  sudo systemctl daemon-reload\n  sudo systemctl enable {}\n  sudo systemctl start {}", cli.service_name, cli.service_name);
+            println!(
+                "Next steps:\n  sudo systemctl daemon-reload\n  sudo systemctl enable {}\n  sudo systemctl start {}",
+                cli.service_name, cli.service_name
+            );
         }
         Err(e) => {
             // Fallback: write to local file for manual install
@@ -293,7 +298,13 @@ fn install_service(cli: &Cli) -> Result<()> {
                 e,
                 local.display()
             );
-            println!("Install manually with:\n  sudo cp {} {}\n  sudo systemctl daemon-reload\n  sudo systemctl enable {}\n  sudo systemctl start {}", local.display(), systemd_path.display(), cli.service_name, cli.service_name);
+            println!(
+                "Install manually with:\n  sudo cp {} {}\n  sudo systemctl daemon-reload\n  sudo systemctl enable {}\n  sudo systemctl start {}",
+                local.display(),
+                systemd_path.display(),
+                cli.service_name,
+                cli.service_name
+            );
         }
     }
 
@@ -309,11 +320,19 @@ fn uninstall_service(cli: &Cli) -> Result<()> {
     match fs::remove_file(&systemd_path) {
         Ok(_) => {
             println!("Removed {}", systemd_path.display());
-            println!("Next steps:\n  sudo systemctl daemon-reload\n  sudo systemctl disable {}\n  sudo systemctl stop {}", cli.service_name, cli.service_name);
+            println!(
+                "Next steps:\n  sudo systemctl daemon-reload\n  sudo systemctl disable {}\n  sudo systemctl stop {}",
+                cli.service_name, cli.service_name
+            );
         }
         Err(e) => {
             println!("Could not remove {} ({}).", systemd_path.display(), e);
-            println!("If the service exists, remove it manually:\n  sudo rm {}\n  sudo systemctl daemon-reload\n  sudo systemctl disable {}\n  sudo systemctl stop {}", systemd_path.display(), cli.service_name, cli.service_name);
+            println!(
+                "If the service exists, remove it manually:\n  sudo rm {}\n  sudo systemctl daemon-reload\n  sudo systemctl disable {}\n  sudo systemctl stop {}",
+                systemd_path.display(),
+                cli.service_name,
+                cli.service_name
+            );
         }
     }
     Ok(())
