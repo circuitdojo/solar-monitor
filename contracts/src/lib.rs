@@ -226,6 +226,9 @@ pub struct DeviceSettingDto {
     pub key: String,
     pub label: String,
     pub group: String,
+    /// UI must ask for confirmation before writing (disruptive settings,
+    /// e.g. those that cut output power).
+    pub requires_confirm: bool,
     pub setting: SettingValueDto,
 }
 

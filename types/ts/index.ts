@@ -32,6 +32,6 @@ export type ProtocolInfoDto = { protocolName: string; name: string; version: str
 
 export type SettingValueDto = { kind: "number"; value: number; min: number; max: number; step: number; unit: string | null } | { kind: "toggle"; enabled: boolean } | { kind: "choice"; value: number; options: number[]; labels: string[] | null; unit: string | null } | { kind: "timeWindow"; start: string; end: string }
 
-export type DeviceSettingDto = { key: string; label: string; group: string; setting: SettingValueDto }
+export type DeviceSettingDto = { key: string; label: string; group: string; requiresConfirm: boolean; setting: SettingValueDto }
 
 export type WriteSettingRequestDto = { value: string }

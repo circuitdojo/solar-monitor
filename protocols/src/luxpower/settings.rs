@@ -29,14 +29,28 @@ pub enum Kind {
         bit: u8,
         labels: [&'static str; 2],
     },
+    /// Multi-bit field of a register (read-modify-write), restricted to an
+    /// enumerated set of field values with display labels (parallel slices).
+    Bits {
+        reg: u16,
+        shift: u8,
+        width: u8,
+        options: &'static [u16],
+        labels: &'static [&'static str],
+    },
     /// Register restricted to an enumerated set of raw values.
     Choice {
         reg: u16,
         options: &'static [u16],
+        labels: Option<&'static [&'static str]>,
         unit: &'static str,
     },
     /// Two registers, each packing hour (low byte) and minute (high byte).
     TimeWindow { start_reg: u16, end_reg: u16 },
+}
+
+fn field_mask(width: u8) -> u16 {
+    (1u16 << width) - 1
 }
 
 pub struct SettingDef {
@@ -62,7 +76,11 @@ fn parse_time(s: &str) -> Result<u16> {
     Ok(h | (m << 8))
 }
 
-fn dto(def: &SettingDef, regs: &dyn Fn(u16) -> u16) -> contracts::DeviceSettingDto {
+fn dto(
+    def: &SettingDef,
+    requires_confirm: bool,
+    regs: &dyn Fn(u16) -> u16,
+) -> contracts::DeviceSettingDto {
     let setting = match &def.kind {
         Kind::Number {
             reg,
@@ -87,10 +105,27 @@ fn dto(def: &SettingDef, regs: &dyn Fn(u16) -> u16) -> contracts::DeviceSettingD
             labels: Some(labels.iter().map(|s| s.to_string()).collect()),
             unit: None,
         },
-        Kind::Choice { reg, options, unit } => contracts::SettingValueDto::Choice {
+        Kind::Bits {
+            reg,
+            shift,
+            width,
+            options,
+            labels,
+        } => contracts::SettingValueDto::Choice {
+            value: (regs(*reg) >> shift) & field_mask(*width),
+            options: options.to_vec(),
+            labels: Some(labels.iter().map(|s| s.to_string()).collect()),
+            unit: None,
+        },
+        Kind::Choice {
+            reg,
+            options,
+            labels,
+            unit,
+        } => contracts::SettingValueDto::Choice {
             value: regs(*reg),
             options: options.to_vec(),
-            labels: None,
+            labels: labels.map(|ls| ls.iter().map(|s| s.to_string()).collect()),
             unit: Some(unit.to_string()),
         },
         Kind::TimeWindow { start_reg, end_reg } => contracts::SettingValueDto::TimeWindow {
@@ -102,6 +137,7 @@ fn dto(def: &SettingDef, regs: &dyn Fn(u16) -> u16) -> contracts::DeviceSettingD
         key: def.key.to_string(),
         label: def.label.to_string(),
         group: def.group.to_string(),
+        requires_confirm,
         setting,
     }
 }
@@ -112,27 +148,48 @@ pub struct LuxPowerSettings {
     pub(crate) handle: Arc<PortHandle>,
     pub(crate) unit_id: u8,
     pub(crate) table: &'static [SettingDef],
+    pub(crate) confirm_keys: &'static [&'static str],
 }
 
 #[async_trait]
 impl solar_monitor_core::SettingsAccess for LuxPowerSettings {
-    /// Read all curated settings (five aligned 40-register holding blocks, regs 0-199).
+    /// Read all curated settings: sweep aligned 40-register holding blocks
+    /// covering every register the table references (the last block is
+    /// trimmed so we never read past the documented map).
     async fn read_settings(&self) -> Result<Vec<contracts::DeviceSettingDto>> {
-        let mut blocks: Vec<Vec<u16>> = Vec::with_capacity(5);
-        for start in [0u16, 40, 80, 120, 160] {
-            blocks.push(
-                self.handle
-                    .read_holding_registers(self.unit_id, start, 40)
-                    .await?,
-            );
+        let max_reg = self
+            .table
+            .iter()
+            .flat_map(|d| match &d.kind {
+                Kind::Number { reg, .. }
+                | Kind::Choice { reg, .. }
+                | Kind::Bit { reg, .. }
+                | Kind::BitChoice { reg, .. }
+                | Kind::Bits { reg, .. } => vec![*reg],
+                Kind::TimeWindow { start_reg, end_reg } => vec![*start_reg, *end_reg],
+            })
+            .max()
+            .unwrap_or(0);
+
+        let mut vals: std::collections::HashMap<u16, u16> = std::collections::HashMap::new();
+        let mut start = 0u16;
+        while start <= max_reg {
+            let qty = 40.min(max_reg + 1 - start);
+            let block = self
+                .handle
+                .read_holding_registers(self.unit_id, start, qty)
+                .await?;
+            for (i, v) in block.iter().enumerate() {
+                vals.insert(start + i as u16, *v);
+            }
+            start += 40;
         }
-        let regs = move |addr: u16| -> u16 {
-            blocks
-                .get((addr / 40) as usize)
-                .map(|b| b[(addr % 40) as usize])
-                .unwrap_or(0)
-        };
-        Ok(self.table.iter().map(|d| dto(d, &regs)).collect())
+        let regs = move |addr: u16| -> u16 { vals.get(&addr).copied().unwrap_or(0) };
+        Ok(self
+            .table
+            .iter()
+            .map(|d| dto(d, self.confirm_keys.contains(&d.key), &regs))
+            .collect())
     }
 
     /// Write one setting, range-checked, then read back and return the stored value.
@@ -186,6 +243,32 @@ impl solar_monitor_core::SettingsAccess for LuxPowerSettings {
                         .await?;
                 }
             }
+            Kind::Bits {
+                reg,
+                shift,
+                width,
+                options,
+                ..
+            } => {
+                let v: u16 = value
+                    .trim()
+                    .parse()
+                    .map_err(|_| anyhow!("expected a number"))?;
+                if !options.contains(&v) {
+                    return Err(anyhow!("{} is not one of {:?}", v, options));
+                }
+                let cur = self
+                    .handle
+                    .read_holding_registers(self.unit_id, *reg, 1)
+                    .await?[0];
+                let mask = field_mask(*width) << shift;
+                let new = (cur & !mask) | (v << shift);
+                if new != cur {
+                    self.handle
+                        .write_single_register(self.unit_id, *reg, new)
+                        .await?;
+                }
+            }
             Kind::Choice { reg, options, .. } => {
                 let v: u16 = value
                     .trim()
@@ -219,7 +302,8 @@ impl solar_monitor_core::SettingsAccess for LuxPowerSettings {
             Kind::Number { reg, .. }
             | Kind::Choice { reg, .. }
             | Kind::Bit { reg, .. }
-            | Kind::BitChoice { reg, .. } => vec![*reg],
+            | Kind::BitChoice { reg, .. }
+            | Kind::Bits { reg, .. } => vec![*reg],
             Kind::TimeWindow { start_reg, end_reg } => vec![*start_reg, *end_reg],
         };
         for a in addrs {
@@ -230,6 +314,6 @@ impl solar_monitor_core::SettingsAccess for LuxPowerSettings {
             vals.insert(a, v);
         }
         let regs = move |addr: u16| -> u16 { *vals.get(&addr).unwrap_or(&0) };
-        Ok(dto(def, &regs))
+        Ok(dto(def, self.confirm_keys.contains(&def.key), &regs))
     }
 }

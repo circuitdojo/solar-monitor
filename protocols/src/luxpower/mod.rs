@@ -38,6 +38,9 @@ pub struct ModelDef {
     pub default_baud: u32,
     pub discovery_bauds: &'static [u32],
     pub settings: &'static [SettingDef],
+    /// Setting keys that are disruptive to write (e.g. cut output power);
+    /// surfaced to the UI as a required confirmation.
+    pub confirm_keys: &'static [&'static str],
     pub decode_metrics: fn(&InputBlocks) -> DeviceMetrics,
 }
 
@@ -166,6 +169,7 @@ impl DeviceProtocol for LuxPowerProtocol {
             handle,
             unit_id: p.unit_id,
             table: self.model.settings,
+            confirm_keys: self.model.confirm_keys,
         })))
     }
 }

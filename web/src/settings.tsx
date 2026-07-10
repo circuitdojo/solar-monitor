@@ -25,6 +25,10 @@ function SettingRow({ deviceId, s, onStored }: {
   const dirty = st.draft !== initial(s.setting)
 
   async function save(value: string) {
+    if (s.requiresConfirm && !confirm(`"${s.label}" can interrupt inverter output.\n\nWrite ${value} to the inverter now?`)) {
+      setSt(p => ({ ...p, draft: initial(s.setting) }))
+      return
+    }
     setSt(p => ({ ...p, saving: true, error: null, saved: false }))
     const res = await fetch(`/api/v1/devices/${deviceId}/settings/${s.key}`, {
       method: 'PUT',

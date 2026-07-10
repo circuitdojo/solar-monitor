@@ -1,4 +1,7 @@
-//! EG4 6000XP: LuxPower register map ("6kXP-Modbus updated on 2023.10.28").
+//! EG4 6000XP: LuxPower register map, sourced from the official document at
+//! `docs/6kXP-Modbus-2023.10.28.pdf` (Table 8, hold registers). Every setting
+//! cites a documented register and range; registers without a documented
+//! range are deliberately excluded.
 //!
 //! The Modbus RTU interface is the dongle port: 19200 baud 8N1, unit 1,
 //! plain standard Modbus RTU. See CLAUDE.md for the hard-won bus notes.
@@ -19,10 +22,104 @@ pub static EG4_6000XP: ModelDef = ModelDef {
     // The 6000XP Modbus interface (dongle port) runs at 19200; sweep 9600 as fallback
     discovery_bauds: &[19200, 9600],
     settings: SETTINGS,
+    // Writing either of these cuts output power — the UI must confirm first.
+    confirm_keys: &["inverter_state", "eps_enabled"],
     decode_metrics,
 };
 
 const SETTINGS: &[SettingDef] = &[
+    // System (FuncEn reg 21; FunctionEn1 reg 110; OutputPrioConfig 145; LineMode 146)
+    SettingDef {
+        key: "inverter_state",
+        label: "Inverter state",
+        group: "System",
+        kind: Kind::BitChoice {
+            reg: FUNC_EN_REG,
+            bit: 9,
+            labels: ["Standby", "Powered on"],
+        },
+    },
+    SettingDef {
+        key: "output_priority",
+        label: "Output priority",
+        group: "System",
+        kind: Kind::Choice {
+            reg: 145,
+            options: &[0, 1, 2],
+            labels: Some(&["Battery first", "PV first", "AC first"]),
+            unit: "",
+        },
+    },
+    SettingDef {
+        key: "line_mode",
+        label: "AC input range",
+        group: "System",
+        kind: Kind::Choice {
+            reg: 146,
+            options: &[0, 1, 2],
+            labels: Some(&[
+                "APL (90-280 V, 20 ms)",
+                "UPS (170-280 V, 10 ms)",
+                "GEN (90-280 V, 20 ms)",
+            ]),
+            unit: "",
+        },
+    },
+    SettingDef {
+        key: "buzzer_enabled",
+        label: "Buzzer (off-grid)",
+        group: "System",
+        kind: Kind::Bit { reg: 110, bit: 7 },
+    },
+    SettingDef {
+        key: "eco_mode",
+        label: "Eco mode",
+        group: "System",
+        kind: Kind::Bit { reg: 110, bit: 15 },
+    },
+    SettingDef {
+        key: "green_mode",
+        label: "Green mode",
+        group: "System",
+        kind: Kind::Bit { reg: 110, bit: 14 },
+    },
+    SettingDef {
+        key: "ongrid_working_mode",
+        label: "On-grid working mode",
+        group: "System",
+        kind: Kind::BitChoice {
+            reg: 110,
+            bit: 11,
+            labels: ["Self consumption", "Charge first"],
+        },
+    },
+    SettingDef {
+        key: "ac_first_window_1",
+        label: "AC-first window 1",
+        group: "System",
+        kind: Kind::TimeWindow {
+            start_reg: 152,
+            end_reg: 153,
+        },
+    },
+    SettingDef {
+        key: "ac_first_window_2",
+        label: "AC-first window 2",
+        group: "System",
+        kind: Kind::TimeWindow {
+            start_reg: 154,
+            end_reg: 155,
+        },
+    },
+    SettingDef {
+        key: "ac_first_window_3",
+        label: "AC-first window 3",
+        group: "System",
+        kind: Kind::TimeWindow {
+            start_reg: 156,
+            end_reg: 157,
+        },
+    },
     // Charging
     SettingDef {
         key: "charge_power_percent",
@@ -63,6 +160,19 @@ const SETTINGS: &[SettingDef] = &[
             unit: "V",
         },
     },
+    SettingDef {
+        key: "float_charge_voltage",
+        label: "Float charge voltage",
+        group: "Charging",
+        kind: Kind::Number {
+            reg: 144,
+            scale: 0.1,
+            min: 50.0,
+            max: 56.0,
+            step: 0.1,
+            unit: "V",
+        },
+    },
     // AC charge
     SettingDef {
         key: "ac_charge_enabled",
@@ -71,6 +181,25 @@ const SETTINGS: &[SettingDef] = &[
         kind: Kind::Bit {
             reg: FUNC_EN_REG,
             bit: 7,
+        },
+    },
+    SettingDef {
+        key: "ac_charge_type",
+        label: "AC charge control",
+        group: "AC charge",
+        kind: Kind::Bits {
+            reg: 120,
+            shift: 1,
+            width: 3,
+            options: &[0, 1, 2, 3, 4, 5],
+            labels: &[
+                "Disabled",
+                "By time",
+                "By voltage",
+                "By SOC",
+                "Voltage + time",
+                "SOC + time",
+            ],
         },
     },
     SettingDef {
@@ -115,6 +244,143 @@ const SETTINGS: &[SettingDef] = &[
         kind: Kind::TimeWindow {
             start_reg: 70,
             end_reg: 71,
+        },
+    },
+    SettingDef {
+        key: "ac_charge_window_3",
+        label: "AC charge window 3",
+        group: "AC charge",
+        kind: Kind::TimeWindow {
+            start_reg: 72,
+            end_reg: 73,
+        },
+    },
+    SettingDef {
+        key: "ac_charge_current",
+        label: "AC charge current limit",
+        group: "AC charge",
+        kind: Kind::Number {
+            reg: 168,
+            scale: 1.0,
+            min: 0.0,
+            max: 140.0,
+            step: 1.0,
+            unit: "A",
+        },
+    },
+    SettingDef {
+        key: "ac_charge_start_voltage",
+        label: "AC charge start voltage",
+        group: "AC charge",
+        kind: Kind::Number {
+            reg: 158,
+            scale: 0.1,
+            min: 38.5,
+            max: 52.0,
+            step: 0.1,
+            unit: "V",
+        },
+    },
+    SettingDef {
+        key: "ac_charge_end_voltage",
+        label: "AC charge end voltage",
+        group: "AC charge",
+        kind: Kind::Number {
+            reg: 159,
+            scale: 0.1,
+            min: 48.0,
+            max: 59.0,
+            step: 0.1,
+            unit: "V",
+        },
+    },
+    SettingDef {
+        key: "ac_charge_start_soc",
+        label: "AC charge start SOC",
+        group: "AC charge",
+        kind: Kind::Number {
+            reg: 160,
+            scale: 1.0,
+            min: 0.0,
+            max: 90.0,
+            step: 1.0,
+            unit: "%",
+        },
+    },
+    // Charge priority (forced charge; FuncEn bit 11, regs 74-81, 201)
+    SettingDef {
+        key: "charge_priority_enabled",
+        label: "Charge priority",
+        group: "Charge priority",
+        kind: Kind::Bit {
+            reg: FUNC_EN_REG,
+            bit: 11,
+        },
+    },
+    SettingDef {
+        key: "charge_priority_power_percent",
+        label: "Charge priority power",
+        group: "Charge priority",
+        kind: Kind::Number {
+            reg: 74,
+            scale: 1.0,
+            min: 0.0,
+            max: 100.0,
+            step: 1.0,
+            unit: "%",
+        },
+    },
+    SettingDef {
+        key: "charge_priority_soc_limit",
+        label: "Charge priority SOC limit",
+        group: "Charge priority",
+        kind: Kind::Number {
+            reg: 75,
+            scale: 1.0,
+            min: 0.0,
+            max: 100.0,
+            step: 1.0,
+            unit: "%",
+        },
+    },
+    SettingDef {
+        key: "charge_priority_end_voltage",
+        label: "Charge priority voltage limit",
+        group: "Charge priority",
+        kind: Kind::Number {
+            reg: 201,
+            scale: 0.1,
+            min: 48.0,
+            max: 59.0,
+            step: 0.1,
+            unit: "V",
+        },
+    },
+    SettingDef {
+        key: "charge_priority_window_1",
+        label: "Charge priority window 1",
+        group: "Charge priority",
+        kind: Kind::TimeWindow {
+            start_reg: 76,
+            end_reg: 77,
+        },
+    },
+    SettingDef {
+        key: "charge_priority_window_2",
+        label: "Charge priority window 2",
+        group: "Charge priority",
+        kind: Kind::TimeWindow {
+            start_reg: 78,
+            end_reg: 79,
+        },
+    },
+    SettingDef {
+        key: "charge_priority_window_3",
+        label: "Charge priority window 3",
+        group: "Charge priority",
+        kind: Kind::TimeWindow {
+            start_reg: 80,
+            end_reg: 81,
         },
     },
     // Discharging
@@ -170,7 +436,315 @@ const SETTINGS: &[SettingDef] = &[
             unit: "V",
         },
     },
+    SettingDef {
+        key: "discharge_ctrl_type",
+        label: "Discharge control",
+        group: "Discharging",
+        kind: Kind::Bits {
+            reg: 120,
+            shift: 4,
+            width: 2,
+            options: &[0, 1, 2],
+            labels: &["By voltage", "By SOC", "Both"],
+        },
+    },
+    SettingDef {
+        key: "ongrid_eod_type",
+        label: "On-grid end of discharge by",
+        group: "Discharging",
+        kind: Kind::BitChoice {
+            reg: 120,
+            bit: 6,
+            labels: ["By voltage", "By SOC"],
+        },
+    },
+    SettingDef {
+        key: "ongrid_eod_voltage",
+        label: "On-grid end-of-discharge voltage",
+        group: "Discharging",
+        kind: Kind::Number {
+            reg: 169,
+            scale: 0.1,
+            min: 40.0,
+            max: 56.0,
+            step: 0.1,
+            unit: "V",
+        },
+    },
+    SettingDef {
+        key: "eps_discharge_soc_low",
+        label: "EPS discharge SOC floor",
+        group: "Discharging",
+        kind: Kind::Number {
+            reg: 125,
+            scale: 1.0,
+            min: 0.0,
+            max: 90.0,
+            step: 1.0,
+            unit: "%",
+        },
+    },
+    // Forced discharge (FuncEn bit 10, regs 82-89, 202)
+    SettingDef {
+        key: "forced_discharge_enabled",
+        label: "Forced discharge",
+        group: "Forced discharge",
+        kind: Kind::Bit {
+            reg: FUNC_EN_REG,
+            bit: 10,
+        },
+    },
+    SettingDef {
+        key: "forced_discharge_power_percent",
+        label: "Forced discharge power",
+        group: "Forced discharge",
+        kind: Kind::Number {
+            reg: 82,
+            scale: 1.0,
+            min: 0.0,
+            max: 100.0,
+            step: 1.0,
+            unit: "%",
+        },
+    },
+    SettingDef {
+        key: "forced_discharge_soc_limit",
+        label: "Forced discharge SOC limit",
+        group: "Forced discharge",
+        kind: Kind::Number {
+            reg: 83,
+            scale: 1.0,
+            min: 0.0,
+            max: 100.0,
+            step: 1.0,
+            unit: "%",
+        },
+    },
+    SettingDef {
+        key: "forced_discharge_end_voltage",
+        label: "Forced discharge voltage limit",
+        group: "Forced discharge",
+        kind: Kind::Number {
+            reg: 202,
+            scale: 0.1,
+            min: 40.0,
+            max: 56.0,
+            step: 0.1,
+            unit: "V",
+        },
+    },
+    SettingDef {
+        key: "forced_discharge_window_1",
+        label: "Forced discharge window 1",
+        group: "Forced discharge",
+        kind: Kind::TimeWindow {
+            start_reg: 84,
+            end_reg: 85,
+        },
+    },
+    SettingDef {
+        key: "forced_discharge_window_2",
+        label: "Forced discharge window 2",
+        group: "Forced discharge",
+        kind: Kind::TimeWindow {
+            start_reg: 86,
+            end_reg: 87,
+        },
+    },
+    SettingDef {
+        key: "forced_discharge_window_3",
+        label: "Forced discharge window 3",
+        group: "Forced discharge",
+        kind: Kind::TimeWindow {
+            start_reg: 88,
+            end_reg: 89,
+        },
+    },
+    // Battery protection (valid per discharge control type; regs 162-167)
+    SettingDef {
+        key: "bat_low_voltage",
+        label: "Battery low alarm voltage",
+        group: "Battery protection",
+        kind: Kind::Number {
+            reg: 162,
+            scale: 0.1,
+            min: 40.0,
+            max: 50.0,
+            step: 0.1,
+            unit: "V",
+        },
+    },
+    SettingDef {
+        key: "bat_low_back_voltage",
+        label: "Battery low recovery voltage",
+        group: "Battery protection",
+        kind: Kind::Number {
+            reg: 163,
+            scale: 0.1,
+            min: 42.0,
+            max: 52.0,
+            step: 0.1,
+            unit: "V",
+        },
+    },
+    SettingDef {
+        key: "bat_low_soc",
+        label: "Battery low alarm SOC",
+        group: "Battery protection",
+        kind: Kind::Number {
+            reg: 164,
+            scale: 1.0,
+            min: 0.0,
+            max: 90.0,
+            step: 1.0,
+            unit: "%",
+        },
+    },
+    SettingDef {
+        key: "bat_low_back_soc",
+        label: "Battery low recovery SOC",
+        group: "Battery protection",
+        kind: Kind::Number {
+            reg: 165,
+            scale: 1.0,
+            min: 20.0,
+            max: 100.0,
+            step: 1.0,
+            unit: "%",
+        },
+    },
+    SettingDef {
+        key: "bat_low_to_utility_voltage",
+        label: "Switch to grid voltage",
+        group: "Battery protection",
+        kind: Kind::Number {
+            reg: 166,
+            scale: 0.1,
+            min: 44.4,
+            max: 51.4,
+            step: 0.1,
+            unit: "V",
+        },
+    },
+    SettingDef {
+        key: "bat_low_to_utility_soc",
+        label: "Switch to grid SOC",
+        group: "Battery protection",
+        kind: Kind::Number {
+            reg: 167,
+            scale: 1.0,
+            min: 0.0,
+            max: 100.0,
+            step: 1.0,
+            unit: "%",
+        },
+    },
+    // Battery (lead-acid; regs 147-151)
+    SettingDef {
+        key: "battery_capacity",
+        label: "Battery capacity (unmatched)",
+        group: "Battery (lead-acid)",
+        kind: Kind::Number {
+            reg: 147,
+            scale: 1.0,
+            min: 0.0,
+            max: 10000.0,
+            step: 1.0,
+            unit: "Ah",
+        },
+    },
+    SettingDef {
+        key: "battery_nominal_voltage",
+        label: "Battery nominal voltage (unmatched)",
+        group: "Battery (lead-acid)",
+        kind: Kind::Number {
+            reg: 148,
+            scale: 0.1,
+            min: 40.0,
+            max: 59.0,
+            step: 0.1,
+            unit: "V",
+        },
+    },
+    SettingDef {
+        key: "equalization_voltage",
+        label: "Equalization voltage",
+        group: "Battery (lead-acid)",
+        kind: Kind::Number {
+            reg: 149,
+            scale: 0.1,
+            min: 50.0,
+            max: 59.0,
+            step: 0.1,
+            unit: "V",
+        },
+    },
+    SettingDef {
+        key: "equalization_interval",
+        label: "Equalization interval",
+        group: "Battery (lead-acid)",
+        kind: Kind::Number {
+            reg: 150,
+            scale: 1.0,
+            min: 0.0,
+            max: 365.0,
+            step: 1.0,
+            unit: "days",
+        },
+    },
+    SettingDef {
+        key: "equalization_duration",
+        label: "Equalization duration",
+        group: "Battery (lead-acid)",
+        kind: Kind::Number {
+            reg: 151,
+            scale: 1.0,
+            min: 0.0,
+            max: 24.0,
+            step: 1.0,
+            unit: "h",
+        },
+    },
+    // Export to grid (FuncEn bit 15, MaxBackFlow 103, FunctionEn1 bit 1)
+    SettingDef {
+        key: "feed_in_grid_enabled",
+        label: "Export to grid",
+        group: "Export to grid",
+        kind: Kind::Bit {
+            reg: FUNC_EN_REG,
+            bit: 15,
+        },
+    },
+    SettingDef {
+        key: "max_feed_in_percent",
+        label: "Export power limit",
+        group: "Export to grid",
+        kind: Kind::Number {
+            reg: 103,
+            scale: 1.0,
+            min: 0.0,
+            max: 100.0,
+            step: 1.0,
+            unit: "%",
+        },
+    },
+    SettingDef {
+        key: "fast_zero_export",
+        label: "Fast zero export",
+        group: "Export to grid",
+        kind: Kind::Bit { reg: 110, bit: 1 },
+    },
     // Generator charging (registers valid on units with a generator on the GEN/AC input)
+    SettingDef {
+        key: "gen_port_mode",
+        label: "GEN port mode",
+        group: "Generator",
+        kind: Kind::BitChoice {
+            reg: 179,
+            bit: 13,
+            labels: ["Generator", "Smart load"],
+        },
+    },
     SettingDef {
         key: "gen_charge_type",
         label: "Generator charge control",
@@ -246,7 +820,37 @@ const SETTINGS: &[SettingDef] = &[
             unit: "A",
         },
     },
+    SettingDef {
+        key: "gen_peak_shaving_enabled",
+        label: "Generator peak shaving",
+        group: "Generator",
+        kind: Kind::Bit { reg: 179, bit: 8 },
+    },
     // Backup output
+    SettingDef {
+        key: "eps_enabled",
+        label: "Off-grid output (EPS)",
+        group: "Backup output",
+        kind: Kind::Bit {
+            reg: FUNC_EN_REG,
+            bit: 0,
+        },
+    },
+    SettingDef {
+        key: "seamless_eps_switch",
+        label: "Seamless off-grid switching",
+        group: "Backup output",
+        kind: Kind::Bit {
+            reg: FUNC_EN_REG,
+            bit: 8,
+        },
+    },
+    SettingDef {
+        key: "micro_grid_enabled",
+        label: "Micro-grid",
+        group: "Backup output",
+        kind: Kind::Bit { reg: 110, bit: 2 },
+    },
     SettingDef {
         key: "eps_voltage",
         label: "Backup output voltage",
@@ -254,6 +858,7 @@ const SETTINGS: &[SettingDef] = &[
         kind: Kind::Choice {
             reg: 90,
             options: &[208, 220, 230, 240, 277],
+            labels: None,
             unit: "V",
         },
     },
@@ -264,7 +869,223 @@ const SETTINGS: &[SettingDef] = &[
         kind: Kind::Choice {
             reg: 91,
             options: &[50, 60],
+            labels: None,
             unit: "Hz",
+        },
+    },
+    // Grid peak shaving (uFunctionEn2 bit 7, regs 206-212, 218-219)
+    SettingDef {
+        key: "grid_peak_shaving_enabled",
+        label: "Grid peak shaving",
+        group: "Grid peak shaving",
+        kind: Kind::Bit { reg: 179, bit: 7 },
+    },
+    SettingDef {
+        key: "grid_peak_shaving_power",
+        label: "Peak shaving power",
+        group: "Grid peak shaving",
+        kind: Kind::Number {
+            reg: 206,
+            scale: 0.1,
+            min: 0.0,
+            max: 25.5,
+            step: 0.1,
+            unit: "kW",
+        },
+    },
+    SettingDef {
+        key: "grid_peak_shaving_soc",
+        label: "Peak shaving SOC",
+        group: "Grid peak shaving",
+        kind: Kind::Number {
+            reg: 207,
+            scale: 1.0,
+            min: 0.0,
+            max: 100.0,
+            step: 1.0,
+            unit: "%",
+        },
+    },
+    SettingDef {
+        key: "grid_peak_shaving_voltage",
+        label: "Peak shaving voltage",
+        group: "Grid peak shaving",
+        kind: Kind::Number {
+            reg: 208,
+            scale: 0.1,
+            min: 48.0,
+            max: 59.0,
+            step: 0.1,
+            unit: "V",
+        },
+    },
+    SettingDef {
+        key: "grid_peak_shaving_soc_2",
+        label: "Peak shaving SOC 2",
+        group: "Grid peak shaving",
+        kind: Kind::Number {
+            reg: 218,
+            scale: 1.0,
+            min: 0.0,
+            max: 100.0,
+            step: 1.0,
+            unit: "%",
+        },
+    },
+    SettingDef {
+        key: "grid_peak_shaving_voltage_2",
+        label: "Peak shaving voltage 2",
+        group: "Grid peak shaving",
+        kind: Kind::Number {
+            reg: 219,
+            scale: 0.1,
+            min: 48.0,
+            max: 59.0,
+            step: 0.1,
+            unit: "V",
+        },
+    },
+    SettingDef {
+        key: "peak_shaving_window_1",
+        label: "Peak shaving window 1",
+        group: "Grid peak shaving",
+        kind: Kind::TimeWindow {
+            start_reg: 209,
+            end_reg: 210,
+        },
+    },
+    SettingDef {
+        key: "peak_shaving_window_2",
+        label: "Peak shaving window 2",
+        group: "Grid peak shaving",
+        kind: Kind::TimeWindow {
+            start_reg: 211,
+            end_reg: 212,
+        },
+    },
+    // Smart load (GEN port in smart-load mode; regs 213-217)
+    SettingDef {
+        key: "smart_load_on_voltage",
+        label: "Smart load on voltage",
+        group: "Smart load (GEN port)",
+        kind: Kind::Number {
+            reg: 213,
+            scale: 0.1,
+            min: 48.0,
+            max: 59.0,
+            step: 0.1,
+            unit: "V",
+        },
+    },
+    SettingDef {
+        key: "smart_load_off_voltage",
+        label: "Smart load off voltage",
+        group: "Smart load (GEN port)",
+        kind: Kind::Number {
+            reg: 214,
+            scale: 0.1,
+            min: 40.0,
+            max: 52.0,
+            step: 0.1,
+            unit: "V",
+        },
+    },
+    SettingDef {
+        key: "smart_load_on_soc",
+        label: "Smart load on SOC",
+        group: "Smart load (GEN port)",
+        kind: Kind::Number {
+            reg: 215,
+            scale: 1.0,
+            min: 0.0,
+            max: 100.0,
+            step: 1.0,
+            unit: "%",
+        },
+    },
+    SettingDef {
+        key: "smart_load_off_soc",
+        label: "Smart load off SOC",
+        group: "Smart load (GEN port)",
+        kind: Kind::Number {
+            reg: 216,
+            scale: 1.0,
+            min: 0.0,
+            max: 100.0,
+            step: 1.0,
+            unit: "%",
+        },
+    },
+    SettingDef {
+        key: "smart_load_start_pv_power",
+        label: "Smart load minimum PV power",
+        group: "Smart load (GEN port)",
+        kind: Kind::Number {
+            reg: 217,
+            scale: 0.1,
+            min: 0.0,
+            max: 12.0,
+            step: 0.1,
+            unit: "kW",
+        },
+    },
+    // AC coupling (uFunctionEn2 bit 11, regs 220-223)
+    SettingDef {
+        key: "ac_couple_enabled",
+        label: "AC coupling",
+        group: "AC coupling (GEN port)",
+        kind: Kind::Bit { reg: 179, bit: 11 },
+    },
+    SettingDef {
+        key: "ac_couple_start_soc",
+        label: "AC couple start SOC",
+        group: "AC coupling (GEN port)",
+        kind: Kind::Number {
+            reg: 220,
+            scale: 1.0,
+            min: 0.0,
+            max: 80.0,
+            step: 1.0,
+            unit: "%",
+        },
+    },
+    SettingDef {
+        key: "ac_couple_end_soc",
+        label: "AC couple end SOC",
+        group: "AC coupling (GEN port)",
+        kind: Kind::Number {
+            reg: 221,
+            scale: 1.0,
+            min: 0.0,
+            max: 100.0,
+            step: 1.0,
+            unit: "%",
+        },
+    },
+    SettingDef {
+        key: "ac_couple_start_voltage",
+        label: "AC couple start voltage",
+        group: "AC coupling (GEN port)",
+        kind: Kind::Number {
+            reg: 222,
+            scale: 0.1,
+            min: 40.0,
+            max: 52.0,
+            step: 0.1,
+            unit: "V",
+        },
+    },
+    SettingDef {
+        key: "ac_couple_end_voltage",
+        label: "AC couple end voltage",
+        group: "AC coupling (GEN port)",
+        kind: Kind::Number {
+            reg: 223,
+            scale: 0.1,
+            min: 40.0,
+            max: 56.0,
+            step: 0.1,
+            unit: "V",
         },
     },
 ];
@@ -573,6 +1394,61 @@ fn decode_metrics(blocks: &InputBlocks) -> DeviceMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn confirm_keys_exist_in_table() {
+        for key in EG4_6000XP.confirm_keys {
+            assert!(
+                SETTINGS.iter().any(|d| d.key == *key),
+                "confirm key '{}' not in settings table",
+                key
+            );
+        }
+    }
+
+    #[test]
+    fn settings_table_is_sane() {
+        let mut keys = std::collections::HashSet::new();
+        for def in SETTINGS {
+            assert!(keys.insert(def.key), "duplicate setting key {}", def.key);
+            match &def.kind {
+                Kind::Number {
+                    min, max, scale, ..
+                } => {
+                    assert!(min < max, "{}: min !< max", def.key);
+                    assert!(*scale > 0.0, "{}: bad scale", def.key);
+                }
+                Kind::Bits {
+                    shift,
+                    width,
+                    options,
+                    labels,
+                    ..
+                } => {
+                    assert!(*width >= 1 && shift + width <= 16, "{}: bad field", def.key);
+                    assert_eq!(options.len(), labels.len(), "{}: labels mismatch", def.key);
+                    let max_field = (1u16 << width) - 1;
+                    for o in *options {
+                        assert!(*o <= max_field, "{}: option {} exceeds width", def.key, o);
+                    }
+                }
+                Kind::Choice {
+                    options, labels, ..
+                } => {
+                    assert!(!options.is_empty(), "{}: empty options", def.key);
+                    if let Some(ls) = labels {
+                        assert_eq!(options.len(), ls.len(), "{}: labels mismatch", def.key);
+                    }
+                }
+                Kind::Bit { bit, .. } | Kind::BitChoice { bit, .. } => {
+                    assert!(*bit < 16, "{}: bad bit", def.key);
+                }
+                Kind::TimeWindow { start_reg, end_reg } => {
+                    assert_ne!(start_reg, end_reg, "{}: same reg twice", def.key);
+                }
+            }
+        }
+    }
 
     fn block_from_regs(regs: &[(u16, u16)]) -> Vec<u8> {
         // 40 registers as LE bytes; (offset-within-block, value) pairs

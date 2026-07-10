@@ -12,7 +12,7 @@ solar-monitor-core = { path = "../core" }
 anyhow = "1.0"
 tracing = "0.1"
 async-trait = "0.1"
-tokio = { version = "1.37", features = ["time", "io-util"] }
+tokio = { version = "1.37", features = ["rt", "time", "io-util", "macros"] }
 tokio-serial = "5.4"
 serde_json = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
