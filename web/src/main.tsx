@@ -32,14 +32,13 @@ function DevicesPage() {
   }
 
   return (
-    <PageShell
-      header={
-        <>
-          <PageTitle>Devices</PageTitle>
-          <button class="vz-btn vz-btn-primary" onClick={() => setShowAdd(true)}>Add Device</button>
-        </>
-      }
-    >
+    <PageShell header={<PageTitle>Devices</PageTitle>}>
+      <div class="flex items-center justify-between">
+        <span class="text-sm" style={{ color: 'var(--vz-ink-3)' }}>
+          {devices ? `${devices.length} device${devices.length === 1 ? '' : 's'}` : ''}
+        </span>
+        <button class="vz-btn vz-btn-primary" onClick={() => setShowAdd(true)}>Add Device</button>
+      </div>
       {error && <div class="vz-card p-4" style={{ color: 'var(--vz-crit)' }}>Error: {error}</div>}
       {!error && devices == null && <div class="p-4" style={{ color: 'var(--vz-ink-3)' }}>Loading…</div>}
       {devices && devices.length === 0 && (
