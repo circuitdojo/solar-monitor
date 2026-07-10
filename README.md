@@ -107,7 +107,7 @@ curl $SOLAR_PI_URL/api/v1/health
 
 Dashboard: `$SOLAR_PI_URL`
 
-For a first-time install on a new host, the binary can generate and install the unit itself: `solar-monitor --install` (see `--help` for `--user`, `--data-dir`, `--service-name`).
+For a first-time install on a new host, the binary can generate and install the unit itself: `sudo ./solar-monitor --install --user <service-user>` (see `--help` for `--data-dir`, `--service-name`, `--port`). It copies the binary to `/usr/local/bin` if it's under `/home` (the unit's `ProtectHome=true` would block execution there), grants serial access via `SupplementaryGroups=dialout`, and lets systemd own the data directory via `StateDirectory=`.
 
 ## Device Discovery
 

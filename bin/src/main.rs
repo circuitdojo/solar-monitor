@@ -203,25 +203,44 @@ fn install_service(cli: &Cli) -> Result<()> {
     use std::io::Write;
     use std::path::PathBuf;
 
-    // Resolve binary path
+    // Resolve binary path. The unit sets ProtectHome=true, so a binary under
+    // /home can't be executed by the service — install a copy outside it.
     let exe = std::env::current_exe()?;
-    let exe_str = exe.to_string_lossy();
-
-    // Resolve data dir and DB path
-    let data_dir = cli
-        .data_dir
-        .clone()
-        .unwrap_or_else(|| "/var/lib/solar-monitor".to_string());
-    let db_path = if cli.db != "./data/solar.db" {
-        cli.db.clone()
+    let exe_str = if exe.starts_with("/home") {
+        let target = format!("/usr/local/bin/{}", cli.service_name);
+        match fs::copy(&exe, &target) {
+            Ok(_) => {
+                println!(
+                    "Copied binary to {} (ProtectHome=true would block execution from /home)",
+                    target
+                );
+                target
+            }
+            Err(e) => {
+                anyhow::bail!(
+                    "binary is at {} (under /home, blocked by ProtectHome) and copying to {} failed: {}.\nRe-run with sudo, or install the binary outside /home first.",
+                    exe.display(), target, e
+                );
+            }
+        }
     } else {
-        format!("{}/solar.db", data_dir)
+        exe.to_string_lossy().into_owned()
     };
 
-    // Ensure directories exist
-    if let Some(parent) = PathBuf::from(&db_path).parent() {
-        let _ = fs::create_dir_all(parent);
-    }
+    // DB lives in the systemd StateDirectory unless overridden — systemd
+    // creates /var/lib/<service-name> with the right ownership for User=.
+    let db_path = if cli.db != "./data/solar.db" {
+        if let Some(parent) = PathBuf::from(&cli.db).parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        cli.db.clone()
+    } else {
+        let data_dir = cli
+            .data_dir
+            .clone()
+            .unwrap_or_else(|| format!("/var/lib/{}", cli.service_name));
+        format!("{}/solar.db", data_dir)
+    };
     if let Some(cfg) = &cli.config_dir {
         let _ = fs::create_dir_all(cfg);
     }
@@ -238,6 +257,10 @@ fn install_service(cli: &Cli) -> Result<()> {
     if let Some(user) = &cli.user {
         unit.push_str(&format!("User={}\n", user));
     }
+    // Serial (RS485) access for a non-root service user
+    unit.push_str("SupplementaryGroups=dialout\n");
+    // Owns /var/lib/<service-name> with correct permissions for User=
+    unit.push_str(&format!("StateDirectory={}\n", cli.service_name));
     unit.push_str(&format!(
         "ExecStart={} --serve --bind {} --port {} --db {}\n",
         exe_str, cli.bind, cli.port, db_path
@@ -274,7 +297,7 @@ fn install_service(cli: &Cli) -> Result<()> {
         }
     }
 
-    println!("Data directory: {} | DB: {}", data_dir, db_path);
+    println!("DB: {}", db_path);
     Ok(())
 }
 
