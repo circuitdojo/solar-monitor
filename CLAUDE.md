@@ -49,6 +49,8 @@ Dependency direction: `bin` → `api` → {`protocols`, `storage`} → {`core`, 
 
 ## Development Commands
 
+Common tasks are in the `justfile` (`just --list`): `just serve` (web build + local serve on 8090), `just test`, `just lint` (fmt + clippy, before every commit), `just types` (TS regen), `just build-pi` / `just deploy` (embed-frontend cross-build → Pi; `build-pi` fails if the frontend didn't get embedded), `just build-freebsd`, `just pi-logs` / `just pi-status`. Underlying commands:
+
 ```sh
 cd web && npm run build            # required before serving locally
 cargo run -p solar-monitor -- --serve --port 8090
@@ -56,7 +58,7 @@ cargo test --workspace
 cargo fmt && cargo clippy --workspace --all-features   # before every commit
 ```
 
-Cross-compile + deploy: see README.md ("Building for the Raspberry Pi", "Deploying").
+Cross-compile + deploy: `just deploy`, or see README.md ("Building for the Raspberry Pi", "Deploying"). Never ship a Pi/FreeBSD binary built without `--features solar-monitor-api/embed-frontend` — the UI 404s while the API works (this has bitten before; the justfile guards against it).
 
 ## Conventions
 

@@ -75,6 +75,8 @@ sysroot produces `for FreeBSD 15.0` binaries; check with `file`).
 
 ## Deploying
 
+`just deploy` does all of the below (frontend build → embed cross-build → scp → restart → health check) and refuses to ship a binary without the embedded UI. The manual steps:
+
 The production Pi is `pi@solar-pi.local` (Debian Bookworm, aarch64, key-only SSH — note the username). The RS485 adapter is `/dev/ttyUSB0`.
 
 ```sh
