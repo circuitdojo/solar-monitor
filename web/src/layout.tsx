@@ -4,6 +4,7 @@ const TABS: [string, string][] = [
   ['/', 'Dashboard'],
   ['/devices', 'Devices'],
   ['/settings', 'Settings'],
+  ['/notifications', 'Notifications'],
 ]
 
 export function Nav() {

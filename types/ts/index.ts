@@ -30,6 +30,14 @@ export type ProtocolCapabilitiesDto = { supportsDiscovery: boolean; supportsSett
 
 export type ProtocolInfoDto = { protocolName: string; name: string; version: string; description: string; supportedDeviceTypes: DeviceType[]; capabilities: ProtocolCapabilitiesDto }
 
+export type NotificationChannelKind = "ntfy" | "email" | "pushover" | "webhook"
+
+export type NotificationChannelDto = { id: string; name: string; kind: NotificationChannelKind; config: { [key: string]: string }; enabled: boolean }
+
+export type NotificationEvent = "gridState" | "batteryLow" | "deviceOffline" | "generator"
+
+export type NotificationRuleDto = { id: string; name: string; event: NotificationEvent; deviceId: string | null; params: { [key: string]: number }; channelIds: string[]; enabled: boolean; cooldownSeconds: number }
+
 export type SettingValueDto = { kind: "number"; value: number; min: number; max: number; step: number; unit: string | null } | { kind: "toggle"; enabled: boolean } | { kind: "choice"; value: number; options: number[]; labels: string[] | null; unit: string | null } | { kind: "timeWindow"; start: string; end: string }
 
 export type DeviceSettingDto = { key: string; label: string; group: string; requiresConfirm: boolean; setting: SettingValueDto }

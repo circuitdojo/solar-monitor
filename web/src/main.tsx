@@ -5,6 +5,7 @@ import './index.css'
 import { DeviceListItemDto, ProtocolInfoDto } from '../../types/ts'
 import { DashboardPage } from './dashboard'
 import { PageShell, PageTitle } from './layout'
+import { NotificationsPage } from './notifications'
 import { SettingsPage } from './settings'
 
 function DevicesPage() {
@@ -88,6 +89,7 @@ function App() {
       <Route path="/" component={DashboardPage} />
       <Route path="/devices" component={DevicesPage} />
       <Route path="/settings" component={SettingsPage} />
+      <Route path="/notifications" component={NotificationsPage} />
     </Router>
   )
 }

@@ -11,6 +11,7 @@ path = "src/lib.rs"
 solar-monitor-core = { path = "../core" }
 contracts = { path = "../contracts" }
 solar-monitor-storage = { path = "../storage" }
+solar-monitor-notify = { path = "../notify" }
 axum = { version = "0.8", default-features = false, features = [
     "macros",
     "ws",

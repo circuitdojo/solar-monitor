@@ -57,6 +57,7 @@ pub struct AppState {
     pub tasks: tokio::sync::Mutex<HashMap<String, tokio::task::JoinHandle<()>>>,
     pub devices: tokio::sync::Mutex<HashMap<String, core::DeviceConfig>>, // in-memory device registry
     pub tx: broadcast::Sender<contracts::DeviceData>,
+    pub notifier: Arc<solar_monitor_notify::Notifier>,
     pub started_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -84,6 +85,26 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/v1/devices/export", get(export_devices))
         .route("/api/v1/devices/import", post(import_devices))
         .route("/api/v1/data/dashboard", get(dashboard_data))
+        .route(
+            "/api/v1/notifications/channels",
+            get(list_notification_channels).post(upsert_notification_channel),
+        )
+        .route(
+            "/api/v1/notifications/channels/test",
+            post(test_notification_channel),
+        )
+        .route(
+            "/api/v1/notifications/channels/{id}",
+            axum::routing::delete(delete_notification_channel),
+        )
+        .route(
+            "/api/v1/notifications/rules",
+            get(list_notification_rules).post(upsert_notification_rule),
+        )
+        .route(
+            "/api/v1/notifications/rules/{id}",
+            axum::routing::delete(delete_notification_rule),
+        )
         .with_state(state.clone());
 
     #[cfg(feature = "embed-frontend")]
@@ -700,6 +721,122 @@ fn to_dto(c: &core::DeviceConfig) -> contracts::DeviceConfigDto {
         poll_interval_seconds: c.poll_interval_seconds,
         connection_params: c.connection_params.clone(),
     }
+}
+
+// ----- Notifications -----
+
+async fn list_notification_channels(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+) -> ApiResult<Json<Vec<contracts::NotificationChannelDto>>> {
+    let channels = state
+        .store
+        .list_notification_channels()
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(Json(channels))
+}
+
+async fn upsert_notification_channel(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+    Json(ch): Json<contracts::NotificationChannelDto>,
+) -> ApiResult<Json<serde_json::Value>> {
+    if ch.id.is_empty() {
+        return Err(ApiError::BadRequest("id must not be empty".into()));
+    }
+    state
+        .store
+        .upsert_notification_channel(&ch)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    state
+        .notifier
+        .reload()
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(Json(serde_json::json!({"status": "ok", "id": ch.id})))
+}
+
+async fn delete_notification_channel(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> ApiResult<Json<serde_json::Value>> {
+    state
+        .store
+        .delete_notification_channel(&id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    state
+        .notifier
+        .reload()
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(Json(serde_json::json!({"status": "removed", "id": id})))
+}
+
+/// Test a channel as configured in the request body (it need not be saved).
+async fn test_notification_channel(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+    Json(ch): Json<contracts::NotificationChannelDto>,
+) -> ApiResult<Json<contracts::TestConnectionResponseDto>> {
+    let resp = match state.notifier.send_test(&ch).await {
+        Ok(()) => contracts::TestConnectionResponseDto {
+            ok: true,
+            message: None,
+        },
+        Err(e) => contracts::TestConnectionResponseDto {
+            ok: false,
+            message: Some(e.to_string()),
+        },
+    };
+    Ok(Json(resp))
+}
+
+async fn list_notification_rules(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+) -> ApiResult<Json<Vec<contracts::NotificationRuleDto>>> {
+    let rules = state
+        .store
+        .list_notification_rules()
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(Json(rules))
+}
+
+async fn upsert_notification_rule(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+    Json(rule): Json<contracts::NotificationRuleDto>,
+) -> ApiResult<Json<serde_json::Value>> {
+    if rule.id.is_empty() {
+        return Err(ApiError::BadRequest("id must not be empty".into()));
+    }
+    state
+        .store
+        .upsert_notification_rule(&rule)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    state
+        .notifier
+        .reload()
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(Json(serde_json::json!({"status": "ok", "id": rule.id})))
+}
+
+async fn delete_notification_rule(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> ApiResult<Json<serde_json::Value>> {
+    state
+        .store
+        .delete_notification_rule(&id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    state
+        .notifier
+        .reload()
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(Json(serde_json::json!({"status": "removed", "id": id})))
 }
 
 #[cfg(feature = "embed-frontend")]

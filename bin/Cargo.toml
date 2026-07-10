@@ -12,6 +12,7 @@ contracts = { path = "../contracts" }
 solar-monitor-core = { path = "../core" }
 solar-monitor-protocols = { path = "../protocols" }
 solar-monitor-storage = { path = "../storage" }
+solar-monitor-notify = { path = "../notify" }
 solar-monitor-api = { path = "../api" }
 axum = { version = "0.8", default-features = false, features = [
     "tokio",

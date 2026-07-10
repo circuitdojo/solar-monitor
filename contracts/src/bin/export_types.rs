@@ -47,6 +47,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     out.push_str("\n\n");
     out.push_str(&ts::export::<ProtocolInfoDto>(&conf)?);
     out.push_str("\n\n");
+    out.push_str(&ts::export::<NotificationChannelKind>(&conf)?);
+    out.push_str("\n\n");
+    out.push_str(&ts::export::<NotificationChannelDto>(&conf)?);
+    out.push_str("\n\n");
+    out.push_str(&ts::export::<NotificationEvent>(&conf)?);
+    out.push_str("\n\n");
+    out.push_str(&ts::export::<NotificationRuleDto>(&conf)?);
+    out.push_str("\n\n");
     out.push_str(&ts::export::<SettingValueDto>(&conf)?);
     out.push_str("\n\n");
     out.push_str(&ts::export::<DeviceSettingDto>(&conf)?);

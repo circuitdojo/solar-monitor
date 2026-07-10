@@ -218,6 +218,140 @@ impl DataStore {
     }
 }
 
+impl DataStore {
+    // Notification channels
+
+    pub async fn upsert_notification_channel(
+        &self,
+        ch: &contracts::NotificationChannelDto,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO notification_channels (id, name, kind, config, enabled)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                name=excluded.name,
+                kind=excluded.kind,
+                config=excluded.config,
+                enabled=excluded.enabled
+            "#,
+        )
+        .bind(&ch.id)
+        .bind(&ch.name)
+        .bind(enum_str(&ch.kind)?)
+        .bind(serde_json::to_string(&ch.config)?)
+        .bind(ch.enabled as i32)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn list_notification_channels(
+        &self,
+    ) -> Result<Vec<contracts::NotificationChannelDto>> {
+        use sqlx::Row;
+        let rows = sqlx::query("SELECT * FROM notification_channels ORDER BY created_at ASC")
+            .fetch_all(&self.pool)
+            .await?;
+        let mut out = Vec::new();
+        for r in rows {
+            let kind_s: String = r.get("kind");
+            let config_s: String = r.get("config");
+            out.push(contracts::NotificationChannelDto {
+                id: r.get("id"),
+                name: r.get("name"),
+                kind: enum_from_str(&kind_s)?,
+                config: serde_json::from_str(&config_s)?,
+                enabled: r.get::<i64, _>("enabled") != 0,
+            });
+        }
+        Ok(out)
+    }
+
+    pub async fn delete_notification_channel(&self, id: &str) -> Result<()> {
+        sqlx::query("DELETE FROM notification_channels WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    // Notification rules
+
+    pub async fn upsert_notification_rule(
+        &self,
+        rule: &contracts::NotificationRuleDto,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO notification_rules
+                (id, name, event, device_id, params, channel_ids, enabled, cooldown_seconds)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                name=excluded.name,
+                event=excluded.event,
+                device_id=excluded.device_id,
+                params=excluded.params,
+                channel_ids=excluded.channel_ids,
+                enabled=excluded.enabled,
+                cooldown_seconds=excluded.cooldown_seconds
+            "#,
+        )
+        .bind(&rule.id)
+        .bind(&rule.name)
+        .bind(enum_str(&rule.event)?)
+        .bind(&rule.device_id)
+        .bind(serde_json::to_string(&rule.params)?)
+        .bind(serde_json::to_string(&rule.channel_ids)?)
+        .bind(rule.enabled as i32)
+        .bind(rule.cooldown_seconds as i64)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn list_notification_rules(&self) -> Result<Vec<contracts::NotificationRuleDto>> {
+        use sqlx::Row;
+        let rows = sqlx::query("SELECT * FROM notification_rules ORDER BY created_at ASC")
+            .fetch_all(&self.pool)
+            .await?;
+        let mut out = Vec::new();
+        for r in rows {
+            let event_s: String = r.get("event");
+            let params_s: String = r.get("params");
+            let channels_s: String = r.get("channel_ids");
+            out.push(contracts::NotificationRuleDto {
+                id: r.get("id"),
+                name: r.get("name"),
+                event: enum_from_str(&event_s)?,
+                device_id: r.get("device_id"),
+                params: serde_json::from_str(&params_s)?,
+                channel_ids: serde_json::from_str(&channels_s)?,
+                enabled: r.get::<i64, _>("enabled") != 0,
+                cooldown_seconds: r.get::<i64, _>("cooldown_seconds") as u32,
+            });
+        }
+        Ok(out)
+    }
+
+    pub async fn delete_notification_rule(&self, id: &str) -> Result<()> {
+        sqlx::query("DELETE FROM notification_rules WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+}
+
+/// Store serde-renamed enums as their bare JSON string (e.g. "gridState").
+fn enum_str<T: serde::Serialize>(v: &T) -> Result<String> {
+    Ok(serde_json::to_string(v)?.trim_matches('"').to_string())
+}
+
+fn enum_from_str<T: serde::de::DeserializeOwned>(s: &str) -> Result<T> {
+    Ok(serde_json::from_str(&format!("\"{}\"", s))?)
+}
+
 fn row_to_device_data(r: sqlx::sqlite::SqliteRow) -> DeviceData {
     // Use column getters by name
     // We must map the row struct; since query! macro returns a struct, but here we used dynamic Row for flexibility

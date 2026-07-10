@@ -192,6 +192,59 @@ pub struct ErrorResponseDto {
     pub timestamp: String,
 }
 
+// Notifications
+
+#[derive(Type, Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum NotificationChannelKind {
+    Ntfy,
+    Email,
+    Pushover,
+    Webhook,
+}
+
+#[derive(Type, Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationChannelDto {
+    pub id: String,
+    pub name: String,
+    pub kind: NotificationChannelKind,
+    /// Kind-specific settings. ntfy: serverUrl, topic, token (optional);
+    /// email: smtpHost, smtpPort, username, password, from, to;
+    /// pushover: userKey, appToken; webhook: url.
+    pub config: HashMap<String, String>,
+    pub enabled: bool,
+}
+
+#[derive(Type, Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum NotificationEvent {
+    /// Grid voltage collapse/return (params: lostBelow, restoredAbove, volts)
+    GridState,
+    /// Battery SOC threshold (params: lowBelow, recoveredAbove, percent)
+    BatteryLow,
+    /// No data from the device (params: offlineAfterSeconds)
+    DeviceOffline,
+    /// Generator start/stop (params: startAbove, stopBelow, watts)
+    Generator,
+}
+
+#[derive(Type, Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationRuleDto {
+    pub id: String,
+    pub name: String,
+    pub event: NotificationEvent,
+    /// None = applies to every device
+    pub device_id: Option<String>,
+    /// Event-specific numeric parameters; missing keys use defaults
+    pub params: HashMap<String, f64>,
+    pub channel_ids: Vec<String>,
+    pub enabled: bool,
+    /// Minimum seconds between repeated firings of the same transition
+    pub cooldown_seconds: u32,
+}
+
 // Device settings (typed, validated register-backed configuration)
 
 #[derive(Type, Debug, Clone, Serialize, Deserialize)]

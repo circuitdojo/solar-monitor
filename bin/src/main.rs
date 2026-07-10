@@ -81,12 +81,15 @@ async fn main() -> Result<()> {
     let registry = solar_monitor_protocols::create_registry();
     let store = Arc::new(solar_monitor_storage::DataStore::new(&cli.db).await?);
     let (tx, _rx) = tokio::sync::broadcast::channel::<contracts::DeviceData>(100);
+    let notifier = solar_monitor_notify::Notifier::new(store.clone()).await?;
+    notifier.clone().spawn(tx.subscribe());
     let state = Arc::new(solar_monitor_api::AppState {
         registry: Arc::new(registry),
         store,
         tasks: tokio::sync::Mutex::new(std::collections::HashMap::new()),
         devices: tokio::sync::Mutex::new(std::collections::HashMap::new()),
         tx,
+        notifier,
         started_at: chrono::Utc::now(),
     });
 

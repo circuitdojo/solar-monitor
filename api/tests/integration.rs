@@ -19,12 +19,16 @@ async fn test_state(_db_path: &str) -> Arc<api::AppState> {
             .unwrap(),
     );
     let (tx, _rx) = tokio::sync::broadcast::channel::<contracts::DeviceData>(16);
+    let notifier = solar_monitor_notify::Notifier::new(store.clone())
+        .await
+        .unwrap();
     Arc::new(api::AppState {
         registry,
         store,
         tasks: tokio::sync::Mutex::new(std::collections::HashMap::new()),
         devices: tokio::sync::Mutex::new(std::collections::HashMap::new()),
         tx,
+        notifier,
         started_at: chrono::Utc::now(),
     })
 }
@@ -117,12 +121,16 @@ async fn test_state_with_mock() -> Arc<api::AppState> {
             .unwrap(),
     );
     let (tx, _rx) = tokio::sync::broadcast::channel::<contracts::DeviceData>(16);
+    let notifier = solar_monitor_notify::Notifier::new(store.clone())
+        .await
+        .unwrap();
     Arc::new(api::AppState {
         registry,
         store,
         tasks: tokio::sync::Mutex::new(std::collections::HashMap::new()),
         devices: tokio::sync::Mutex::new(std::collections::HashMap::new()),
         tx,
+        notifier,
         started_at: chrono::Utc::now(),
     })
 }
@@ -483,6 +491,89 @@ async fn update_restarts_polling_task() {
     let res = put_json(&app, "/api/v1/devices/devUpd", off).await;
     assert!(res.status().is_success());
     assert_eq!(state.tasks.lock().await.len(), 0);
+}
+
+#[tokio::test]
+async fn notification_channels_and_rules_crud() {
+    let app = test_app(":memory:").await;
+
+    // Create a channel
+    let res = post_json(
+        &app,
+        "/api/v1/notifications/channels",
+        json!({
+            "id": "ntfy1",
+            "name": "Phone",
+            "kind": "ntfy",
+            "config": {"topic": "solar-test"},
+            "enabled": true
+        }),
+    )
+    .await;
+    assert!(res.status().is_success());
+
+    // Create a rule referencing it
+    let res = post_json(
+        &app,
+        "/api/v1/notifications/rules",
+        json!({
+            "id": "rule1",
+            "name": "Grid watch",
+            "event": "gridState",
+            "deviceId": null,
+            "params": {"lostBelow": 80.0, "restoredAbove": 100.0},
+            "channelIds": ["ntfy1"],
+            "enabled": true,
+            "cooldownSeconds": 300
+        }),
+    )
+    .await;
+    assert!(res.status().is_success());
+
+    // Round trip
+    let res = get(&app, "/api/v1/notifications/channels").await;
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v.as_array().unwrap().len(), 1);
+    assert_eq!(v[0]["kind"], "ntfy");
+    assert_eq!(v[0]["config"]["topic"], "solar-test");
+
+    let res = get(&app, "/api/v1/notifications/rules").await;
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v.as_array().unwrap().len(), 1);
+    assert_eq!(v[0]["event"], "gridState");
+    assert_eq!(v[0]["params"]["lostBelow"], 80.0);
+    assert_eq!(v[0]["channelIds"][0], "ntfy1");
+
+    // Test-send with a broken channel config reports failure, not 500
+    let res = post_json(
+        &app,
+        "/api/v1/notifications/channels/test",
+        json!({
+            "id": "x",
+            "name": "bad",
+            "kind": "ntfy",
+            "config": {},
+            "enabled": true
+        }),
+    )
+    .await;
+    assert!(res.status().is_success());
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["ok"], false);
+    assert!(v["message"].as_str().unwrap().contains("topic"));
+
+    // Delete both
+    let res = delete(&app, "/api/v1/notifications/rules/rule1").await;
+    assert!(res.status().is_success());
+    let res = delete(&app, "/api/v1/notifications/channels/ntfy1").await;
+    assert!(res.status().is_success());
+    let res = get(&app, "/api/v1/notifications/channels").await;
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(v.as_array().unwrap().is_empty());
 }
 
 #[tokio::test]

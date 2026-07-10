@@ -17,13 +17,14 @@ Browser ↔ HTTP/WS (axum, port 8080) ↔ solar-monitor ↔ /dev/ttyUSB0 (RS485)
 | `contracts/` | `contracts` | API DTOs (serde camelCase); exports TypeScript bindings via specta (`src/bin/export_types.rs` → `types/ts/index.ts`) |
 | `core/` | `solar-monitor-core` | `DeviceProtocol`/`DeviceConnection`/`SettingsAccess` traits, `ProtocolRegistry`, `DeviceConfig`, `ScanConfig` |
 | `protocols/` | `solar-monitor-protocols` | Layered drivers: `transport/modbus_rtu.rs` (per-port actor with `set_slave`), `luxpower/` (protocol family: connection, settings engine), `luxpower/models/` (per-model `ModelDef`: register decode + settings table, e.g. `eg4_6000xp.rs`) |
-| `storage/` | `solar-monitor-storage` | `DataStore` over sqlx/SQLite; schema in `migrations/001_init.sql` |
+| `storage/` | `solar-monitor-storage` | `DataStore` over sqlx/SQLite; schema in `migrations/*.sql` |
+| `notify/` | `solar-monitor-notify` | Notification engine: subscribes to the live-data broadcast, edge-triggered event detectors (grid lost/restored, battery low, device offline, generator) with hysteresis + per-transition cooldown; channel senders for ntfy/email/Pushover/webhook (rustls only — native-tls breaks cross-builds) |
 | `api/` | `solar-monitor-api` | Axum `Router`, `AppState`, polling tasks, WebSocket broadcast, frontend serving |
 | `bin/` | `solar-monitor` | CLI (clap): `--serve`, `--discover`, `--install`/`--uninstall` (systemd), state composition |
 | `web/` | (npm, not cargo) | Preact + Vite + Tailwind UI; wouter routing; built output in `web/dist/` |
 | `bridge/` | (legacy) | Old WebSocket-to-TCP PI30 bridge; not a workspace member, kept for reference (the PI30 protocol driver was removed from `protocols/` entirely) |
 
-Dependency direction: `bin` → `api` → {`protocols`, `storage`} → {`core`, `contracts`}.
+Dependency direction: `bin` → `api` → {`protocols`, `storage`, `notify`} → {`core`, `contracts`}.
 
 ## Key Mechanics
 
@@ -32,6 +33,7 @@ Dependency direction: `bin` → `api` → {`protocols`, `storage`} → {`core`, 
 - Generator charge settings (hold regs 194–198) are mode-dependent: SOC pair active when reg 120 bit7 = 1 ("By SOC"), voltage pair when 0 — the inverter ignores the inactive pair. Both are always shown/editable.
 - **Polling**: `solar_monitor_api::start_polling` spawns a task per enabled device; task handles live in `AppState.tasks`. On startup, `bin/src/main.rs` auto-starts polling for persisted enabled devices; a device whose protocol isn't in the registry (e.g. an old `eg4-pi30-rs485` row) logs a warning, shows as Stopped, and can be edited/removed in the UI — it is never deleted automatically.
 - **Serial access**: one actor per physical serial port keyed by path (multiple Modbus unit IDs share one RS485 bus; each request carries its unit id). Requesting a port that is already open at a different baud is a hard error, not a second actor. Default baud comes from the model (`ModelDef::default_baud`, 19200 for the 6000XP). Discovery iterates every registered protocol; the LuxPower sweep probes unit IDs 1–3 per baud.
+- **Notifications**: channels and rules persist in SQLite (`002_notifications.sql`) and are edited on the Notifications page (`/api/v1/notifications/*`; config mutations call `Notifier::reload`). The engine baselines silently on the first sample per (rule, device) — no alert storm at startup — then fires only on state transitions; the offline detector runs on a 15 s ticker keyed off last data arrival. Channel `config` maps are kind-specific string maps (see `notify/src/channels.rs`); secrets live in the DB in plaintext, same trust model as the rest of the LAN-only app.
 - **Frontend serving**: without features, `ServeDir` from `web/dist` (path resolved via `CARGO_MANIFEST_DIR`, works from any CWD in dev). With `--features solar-monitor-api/embed-frontend`, `rust_embed` compiles `web/dist` into the binary — this is how production builds ship. Build `web/` before the cargo build in that case.
 - **Generated types**: never hand-edit `types/ts/index.ts`; run `cargo run -p contracts --bin export_types`. Contracts use camelCase serde renames — enum values like `DeviceType` are `"solarInverter"` etc.; the frontend must match exactly (they cross the wire).
 
