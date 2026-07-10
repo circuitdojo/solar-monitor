@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # Builds web/dist (needed by the dev-mode ServeDir path) and type-checks
+      - name: Build frontend
+        run: cd web && npm ci && npm run build
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-features -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Generated TypeScript types are current
+        run: |
+          cargo run -p contracts --bin export_types
+          git diff --exit-code types/ts/index.ts
+
+  build:
+    needs: test
+    strategy:
+      matrix:
+        target: [x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # The release binary embeds web/dist via rust_embed
+      - name: Build frontend
+        run: cd web && npm ci && npm run build
+
+      - name: Install aarch64 cross toolchain
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Add Rust target
+        run: rustup target add ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build release binary (embedded frontend)
+        run: |
+          cargo build --release --target ${{ matrix.target }} \
+            -p solar-monitor --features solar-monitor-api/embed-frontend
+
+      # Same guard as `just build-pi`: a binary without the embedded UI
+      # serves the API but 404s the dashboard — never ship one
+      - name: Verify frontend is embedded
+        run: |
+          strings target/${{ matrix.target }}/release/solar-monitor | grep -q "assets/index-" \
+            || { echo "ERROR: frontend not embedded in binary"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: solar-monitor-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/solar-monitor
+          if-no-files-found: error
