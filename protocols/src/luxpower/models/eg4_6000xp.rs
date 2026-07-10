@@ -1037,6 +1037,19 @@ const SETTINGS: &[SettingDef] = &[
         kind: Kind::Bit { reg: 179, bit: 11 },
     },
     SettingDef {
+        key: "ac_couple_ctrl_type",
+        label: "AC couple control",
+        group: "AC coupling (GEN port)",
+        // uFunctionEn2.ubBatChgControl (reg 179 bit 9) selects which pair
+        // below is live — the inverter ignores the other one, same as
+        // gen_charge_type gating the generator start/end pair.
+        kind: Kind::BitChoice {
+            reg: 179,
+            bit: 9,
+            labels: ["By SOC", "By voltage"],
+        },
+    },
+    SettingDef {
         key: "ac_couple_start_soc",
         label: "AC couple start SOC",
         group: "AC coupling (GEN port)",
