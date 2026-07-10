@@ -22,7 +22,6 @@ Browser ↔ HTTP/WS (axum, port 8080) ↔ solar-monitor ↔ /dev/ttyUSB0 (RS485)
 | `api/` | `solar-monitor-api` | Axum `Router`, `AppState`, polling tasks, WebSocket broadcast, frontend serving |
 | `bin/` | `solar-monitor` | CLI (clap): `--serve`, `--discover`, `--install`/`--uninstall` (systemd), state composition |
 | `web/` | (npm, not cargo) | Preact + Vite + Tailwind UI; wouter routing; built output in `web/dist/` |
-| `bridge/` | (legacy) | Old WebSocket-to-TCP PI30 bridge; not a workspace member, kept for reference (the PI30 protocol driver was removed from `protocols/` entirely) |
 
 Dependency direction: `bin` → `api` → {`protocols`, `storage`, `notify`} → {`core`, `contracts`}.
 
