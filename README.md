@@ -1,5 +1,7 @@
 # Solar Monitor
 
+![Screenshot](screenshot.png)
+
 Monitoring service for EG4 solar inverters (6000XP via Modbus RTU). Single Rust binary serving a REST/WebSocket API and an embedded Preact web UI, with SQLite storage. Runs on a Raspberry Pi next to the inverter.
 
 ## Local Development
