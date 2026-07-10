@@ -17,6 +17,7 @@ use tokio::sync::broadcast;
 #[derive(Serialize)]
 struct HealthResponse {
     status: &'static str,
+    version: &'static str,
 }
 
 // Unified API error type
@@ -119,7 +120,10 @@ pub fn router(state: Arc<AppState>) -> Router {
 }
 
 async fn health() -> Json<HealthResponse> {
-    Json(HealthResponse { status: "healthy" })
+    Json(HealthResponse {
+        status: "healthy",
+        version: solar_monitor_core::version(),
+    })
 }
 
 async fn ws_upgrade(
