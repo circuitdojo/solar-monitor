@@ -1,4 +1,4 @@
-# EG4 Monitor (Solar Monitor) - Codebase Architecture
+# Solar Monitor - Codebase Architecture
 
 ## Overview
 
