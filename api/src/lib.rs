@@ -238,12 +238,6 @@ async fn add_device(
     axum::extract::State(state): axum::extract::State<Arc<AppState>>,
     Json(req): Json<contracts::AddDeviceRequestDto>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    if !req.enabled {
-        return Ok(Json(
-            serde_json::json!({ "status": "disabled", "id": req.id }),
-        ));
-    }
-
     // Build core config
     let cfg = core::DeviceConfig {
         id: req.id.clone(),
@@ -255,15 +249,10 @@ async fn add_device(
         poll_interval_seconds: req.poll_interval_seconds,
     };
 
-    // Persist device
+    // Persist device (disabled devices are stored too — they just don't poll)
     state
         .store
         .upsert_device_config(&cfg)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-    // Spawn polling task
-    start_polling(state.clone(), cfg.clone())
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
@@ -271,6 +260,13 @@ async fn add_device(
     {
         let mut devices = state.devices.lock().await;
         devices.insert(req.id.clone(), cfg.clone());
+    }
+
+    // Spawn polling task
+    if cfg.enabled {
+        start_polling(state.clone(), cfg)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
     }
 
     Ok(Json(serde_json::json!({ "status": "ok", "id": req.id })))
@@ -523,18 +519,19 @@ async fn update_device(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-    // Restart task if enabled, stop if disabled
-    if !cfg.enabled {
-        if let Some(h) = state.tasks.lock().await.remove(&cfg.id) {
-            h.abort();
-        }
-    } else {
-        // replace in-memory config
-        state
-            .devices
-            .lock()
-            .await
-            .insert(cfg.id.clone(), cfg.clone());
+    // Replace in-memory config
+    state
+        .devices
+        .lock()
+        .await
+        .insert(cfg.id.clone(), cfg.clone());
+
+    // Stop any running task so the new interval/params take effect, then
+    // restart if enabled (start_polling no-ops when a task already exists).
+    if let Some(h) = state.tasks.lock().await.remove(&cfg.id) {
+        h.abort();
+    }
+    if cfg.enabled {
         start_polling(state.clone(), cfg)
             .await
             .map_err(|e| ApiError::Internal(e.to_string()))?;
@@ -745,8 +742,12 @@ fn frontend_embed_router() -> Router {
 
 #[cfg(not(feature = "embed-frontend"))]
 fn frontend_fs_router() -> Router {
-    use tower_http::services::ServeDir;
-    let service = ServeDir::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../web/dist"));
+    use tower_http::services::{ServeDir, ServeFile};
+    let dist = concat!(env!("CARGO_MANIFEST_DIR"), "/../web/dist");
+    // SPA fallback: deep links like /devices must serve index.html,
+    // matching the embed-frontend router's behavior
+    let service =
+        ServeDir::new(dist).not_found_service(ServeFile::new(format!("{}/index.html", dist)));
     Router::new().fallback_service(service)
 }
 

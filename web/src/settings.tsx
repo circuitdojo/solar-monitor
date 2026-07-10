@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'preact/hooks'
-import { Link } from 'wouter'
 import { DeviceSettingDto, SettingValueDto } from '../../types/ts'
 import { DeviceSelect, useDeviceSelection, useDevices } from './device-select'
+import { PageShell, PageTitle } from './layout'
 
 // Editable state per setting: the string form the input holds
 function initial(s: SettingValueDto): string {
@@ -170,16 +170,14 @@ export function SettingsPage() {
   }
 
   return (
-    <div class="p-4 md:p-6 space-y-4 max-w-3xl mx-auto">
-      <div class="flex items-center justify-between flex-wrap gap-2">
-        <div class="flex items-center gap-3">
-          <h1 class="text-xl font-semibold" style={{ color: 'var(--vz-ink)' }}>
-            Inverter Settings{device ? ` — ${device.name}` : ''}
-          </h1>
+    <PageShell
+      header={
+        <>
+          <PageTitle>Inverter Settings{device ? ` — ${device.name}` : ''}</PageTitle>
           <DeviceSelect devices={settable} selected={deviceId} onSelect={select} />
-        </div>
-        <Link href="/"><a class="text-sm hover:underline" style={{ color: 'var(--vz-load)' }}>Dashboard</a></Link>
-      </div>
+        </>
+      }
+    >
       <div class="text-sm" style={{ color: 'var(--vz-ink-3)' }}>
         Values are read from the inverter's holding registers. Writes are range-checked and
         read back to confirm — changes take effect on the inverter immediately.
@@ -192,12 +190,14 @@ export function SettingsPage() {
       {!error && device && settings === null && (
         <div class="p-4" style={{ color: 'var(--vz-ink-3)' }}>Reading settings from inverter…</div>
       )}
-      {groups.map(([group, items]) => (
-        <div class="vz-card p-4">
-          <div class="text-sm font-medium mb-1" style={{ color: 'var(--vz-ink-2)' }}>{group}</div>
-          {items.map(s => <SettingRow deviceId={device!.id} s={s} onStored={onStored} />)}
-        </div>
-      ))}
-    </div>
+      <div class="grid gap-3 grid-cols-1 lg:grid-cols-2 items-start">
+        {groups.map(([group, items]) => (
+          <div class="vz-card p-4">
+            <div class="text-sm font-medium mb-1" style={{ color: 'var(--vz-ink-2)' }}>{group}</div>
+            {items.map(s => <SettingRow deviceId={device!.id} s={s} onStored={onStored} />)}
+          </div>
+        ))}
+      </div>
+    </PageShell>
   )
 }

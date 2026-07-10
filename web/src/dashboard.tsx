@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
-import { Link } from 'wouter'
 import { DeviceData } from '../../types/ts'
 import { DeviceSelect, useDeviceSelection, useDevices } from './device-select'
+import { PageShell, PageTitle } from './layout'
 
 // One polled reading, flattened for charting
 type Sample = {
@@ -416,10 +416,10 @@ export function DashboardPage() {
   ]
 
   return (
-    <div class="p-4 md:p-6 space-y-4 max-w-6xl mx-auto">
-      <div class="flex items-center justify-between flex-wrap gap-2">
-        <div class="flex items-center gap-3">
-          <h1 class="text-xl font-semibold" style={{ color: 'var(--vz-ink)' }}>{device?.name || 'Solar Monitor'}</h1>
+    <PageShell
+      header={
+        <>
+          <PageTitle>{device?.name || 'Solar Monitor'}</PageTitle>
           <DeviceSelect devices={devices || []} selected={device?.id ?? null} onSelect={select} />
           <span
             class="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full"
@@ -433,13 +433,9 @@ export function DashboardPage() {
             {!stale && wsUp ? 'Live' : wsUp ? 'Stale data' : 'Disconnected'}
           </span>
           {latest && <span class="text-xs" style={{ color: 'var(--vz-ink-3)' }}>updated {new Date(latest.t).toLocaleTimeString()}</span>}
-        </div>
-        <div class="flex items-center gap-4">
-          <Link href="/settings"><a class="text-sm hover:underline" style={{ color: 'var(--vz-load)' }}>Settings</a></Link>
-          <Link href="/devices"><a class="text-sm hover:underline" style={{ color: 'var(--vz-load)' }}>Devices</a></Link>
-        </div>
-      </div>
-
+        </>
+      }
+    >
       {error && <Card><div style={{ color: 'var(--vz-crit)' }}>Error: {error}</div></Card>}
       {!error && devices != null && !device && <Card><div style={{ color: 'var(--vz-ink-2)' }}>No devices configured yet — add one on the Devices page.</div></Card>}
 
@@ -550,6 +546,6 @@ export function DashboardPage() {
           </div>
         </>
       )}
-    </div>
+    </PageShell>
   )
 }

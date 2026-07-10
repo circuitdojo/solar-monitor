@@ -1,18 +1,20 @@
 import { render } from 'preact'
 import { useEffect, useState } from 'preact/hooks'
-import { Link, Route, Router } from 'wouter'
+import { Route, Router } from 'wouter'
 import './index.css'
 import { DeviceListItemDto, ProtocolInfoDto } from '../../types/ts'
 import { DashboardPage } from './dashboard'
+import { PageShell, PageTitle } from './layout'
 import { SettingsPage } from './settings'
 
 function DevicesPage() {
   const [devices, setDevices] = useState<DeviceListItemDto[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [showAdd, setShowAdd] = useState(false)
+  const [editing, setEditing] = useState<DeviceListItemDto | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
   const reload = () => setRefreshKey(k => k + 1)
-  const onAdded = () => { setShowAdd(false); reload() }
+  const onSaved = () => { setShowAdd(false); setEditing(null); reload() }
 
   useEffect(() => {
     let cancelled = false
@@ -30,14 +32,14 @@ function DevicesPage() {
   }
 
   return (
-    <div class="p-4 md:p-6 space-y-4 max-w-6xl mx-auto">
-      <div class="flex items-center justify-between">
-        <h1 class="text-xl font-semibold" style={{ color: 'var(--vz-ink)' }}>Devices</h1>
-        <div class="flex items-center gap-3">
+    <PageShell
+      header={
+        <>
+          <PageTitle>Devices</PageTitle>
           <button class="vz-btn vz-btn-primary" onClick={() => setShowAdd(true)}>Add Device</button>
-          <Link href="/"><a class="text-sm hover:underline" style={{ color: 'var(--vz-load)' }}>Dashboard</a></Link>
-        </div>
-      </div>
+        </>
+      }
+    >
       {error && <div class="vz-card p-4" style={{ color: 'var(--vz-crit)' }}>Error: {error}</div>}
       {!error && devices == null && <div class="p-4" style={{ color: 'var(--vz-ink-3)' }}>Loading…</div>}
       {devices && devices.length === 0 && (
@@ -69,13 +71,15 @@ function DevicesPage() {
                 />
                 {d.isPolling ? 'Polling' : 'Stopped'}
               </span>
+              <button class="vz-btn vz-btn-ghost" onClick={() => setEditing(d)}>Edit</button>
               <button class="vz-btn vz-btn-danger" onClick={() => remove(d.id)}>Remove</button>
             </div>
           </div>
         ))}
       </div>
-      {showAdd && <AddDeviceModal onClose={() => setShowAdd(false)} onSaved={onAdded} />}
-    </div>
+      {showAdd && <DeviceModal onClose={() => setShowAdd(false)} onSaved={onSaved} />}
+      {editing && <DeviceModal device={editing} onClose={() => setEditing(null)} onSaved={onSaved} />}
+    </PageShell>
   )
 }
 
@@ -100,19 +104,20 @@ function Field({ label, children }: { label: string; children: any }) {
   )
 }
 
-type AddDeviceProps = { onClose: () => void; onSaved: () => void }
-function AddDeviceModal({ onClose, onSaved }: AddDeviceProps) {
+type DeviceModalProps = { device?: DeviceListItemDto; onClose: () => void; onSaved: () => void }
+function DeviceModal({ device, onClose, onSaved }: DeviceModalProps) {
+  const editing = device != null
   const [serialPorts, setSerialPorts] = useState<string[]>([])
   const [protocols, setProtocols] = useState<ProtocolInfoDto[]>([])
-  const [id, setId] = useState('')
-  const [name, setName] = useState('')
-  const [deviceType, setDeviceType] = useState<DeviceListItemDto['deviceType']>('solarInverter')
-  const [protocolName, setProtocolName] = useState('')
-  const [serialPort, setSerialPort] = useState('')
-  const [baudRate, setBaudRate] = useState('19200')
-  const [unitId, setUnitId] = useState('1')
-  const [pollInterval, setPollInterval] = useState(30)
-  const [enabled, setEnabled] = useState(false)
+  const [id, setId] = useState(device?.id ?? '')
+  const [name, setName] = useState(device?.name ?? '')
+  const [deviceType, setDeviceType] = useState<DeviceListItemDto['deviceType']>(device?.deviceType ?? 'solarInverter')
+  const [protocolName, setProtocolName] = useState(device?.protocolName ?? '')
+  const [serialPort, setSerialPort] = useState(device?.connectionParams['serial_port'] ?? '')
+  const [baudRate, setBaudRate] = useState(device?.connectionParams['baud_rate'] ?? '19200')
+  const [unitId, setUnitId] = useState(device?.connectionParams['unit_id'] ?? '1')
+  const [pollInterval, setPollInterval] = useState(device?.pollIntervalSeconds ?? 30)
+  const [enabled, setEnabled] = useState(device?.enabled ?? false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -135,10 +140,14 @@ function AddDeviceModal({ onClose, onSaved }: AddDeviceProps) {
       protocolName,
       enabled,
       pollIntervalSeconds: pollInterval,
-      connectionParams: { serial_port: serialPort, baud_rate: baudRate, unit_id: unitId }
+      // Keep params this form doesn't edit (e.g. parity from discovery)
+      connectionParams: {
+        ...(device?.connectionParams ?? {}),
+        serial_port: serialPort, baud_rate: baudRate, unit_id: unitId,
+      },
     }
-    const res = await fetch('/api/v1/devices', {
-      method: 'POST',
+    const res = await fetch(editing ? `/api/v1/devices/${device.id}` : '/api/v1/devices', {
+      method: editing ? 'PUT' : 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body)
     })
@@ -150,12 +159,12 @@ function AddDeviceModal({ onClose, onSaved }: AddDeviceProps) {
     <div class="fixed inset-0 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.4)' }}>
       <div class="vz-card w-[520px] max-w-full">
         <div class="px-4 py-3 font-semibold" style={{ borderBottom: '1px solid var(--vz-border)', color: 'var(--vz-ink)' }}>
-          Add Device
+          {editing ? `Edit Device — ${device.name}` : 'Add Device'}
         </div>
         <div class="p-4 space-y-3">
           <div class="grid grid-cols-2 gap-3">
             <Field label="ID">
-              <input class="vz-input" value={id} onInput={(e: any) => setId(e.target.value)} />
+              <input class="vz-input" value={id} disabled={editing} onInput={(e: any) => setId(e.target.value)} />
             </Field>
             <Field label="Name">
               <input class="vz-input" value={name} onInput={(e: any) => setName(e.target.value)} />

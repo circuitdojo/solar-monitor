@@ -414,6 +414,78 @@ async fn settings_404_and_discovery_empty() {
 }
 
 #[tokio::test]
+async fn add_disabled_device_is_persisted() {
+    let app = test_app(":memory:").await;
+
+    let res = post_json(
+        &app,
+        "/api/v1/devices",
+        json!({
+            "id": "devOff",
+            "name": "Added disabled",
+            "deviceType": "solarInverter",
+            "protocolName": "eg4-6000xp-modbus",
+            "enabled": false,
+            "pollIntervalSeconds": 30,
+            "connectionParams": {"serial_port": "/dev/ttyS8", "baud_rate": "19200"}
+        }),
+    )
+    .await;
+    assert!(res.status().is_success());
+
+    // The device must exist afterwards (previously it was silently dropped)
+    let res = get(&app, "/api/v1/devices/devOff").await;
+    assert!(res.status().is_success());
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["id"], "devOff");
+    assert_eq!(v["enabled"], false);
+}
+
+#[tokio::test]
+async fn update_restarts_polling_task() {
+    let state = test_state_with_mock().await;
+    let app = api::router(state.clone());
+
+    let body = |interval: u32| {
+        json!({
+            "id": "devUpd",
+            "name": "Mock",
+            "deviceType": "solarInverter",
+            "protocolName": "mock-proto",
+            "enabled": true,
+            "pollIntervalSeconds": interval,
+            "connectionParams": {}
+        })
+    };
+    let res = put_json(&app, "/api/v1/devices/devUpd", body(5)).await;
+    assert!(res.status().is_success());
+    let first = {
+        let tasks = state.tasks.lock().await;
+        assert_eq!(tasks.len(), 1);
+        // JoinHandle identity via its raw id
+        format!("{:?}", tasks.get("devUpd").unwrap().id())
+    };
+
+    // Update with a new interval: the old task must be replaced, not kept
+    let res = put_json(&app, "/api/v1/devices/devUpd", body(60)).await;
+    assert!(res.status().is_success());
+    let second = {
+        let tasks = state.tasks.lock().await;
+        assert_eq!(tasks.len(), 1);
+        format!("{:?}", tasks.get("devUpd").unwrap().id())
+    };
+    assert_ne!(first, second, "polling task should be restarted on update");
+
+    // Disabling stops the task
+    let mut off = body(60);
+    off["enabled"] = json!(false);
+    let res = put_json(&app, "/api/v1/devices/devUpd", off).await;
+    assert!(res.status().is_success());
+    assert_eq!(state.tasks.lock().await.len(), 0);
+}
+
+#[tokio::test]
 async fn import_export_round_trip() {
     let app = test_app(":memory:").await;
 
