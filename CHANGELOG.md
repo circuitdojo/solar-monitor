@@ -4,6 +4,18 @@ All notable changes to Solar Monitor are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.1] - 2026-07-13
+
+### Fixed
+
+- Transient Modbus timeouts no longer drop poll samples. The 6000XP
+  occasionally skips a request even on a healthy bus; the port actor now
+  enforces a 50 ms quiet gap between transactions, retries each request once
+  on timeout, and reopens the port between attempts so a late-arriving
+  response can't be misattributed to the next request (RTU responses carry
+  no address field). A `WARN` poll failure now means both attempts timed
+  out; single timeouts log at `debug`.
+
 ## [0.4.0] - 2026-07-13
 
 ### Fixed
