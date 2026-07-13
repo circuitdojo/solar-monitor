@@ -4,6 +4,17 @@ All notable changes to Solar Monitor are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.2] - 2026-07-13
+
+### Changed
+
+- Device ids are server-minted UUIDs. The Add Device form no longer asks for
+  an ID — `POST /api/v1/devices` generates one and returns it, and
+  `PUT /api/v1/devices/{id}` is update-only (404 for unknown ids) instead of
+  upserting, so a create can no longer silently overwrite an existing device.
+  `AddDeviceRequestDto` loses its `id` field (API/TypeScript wire change).
+  Existing devices keep their ids; export/import still preserves ids.
+
 ## [0.4.1] - 2026-07-13
 
 ### Fixed
