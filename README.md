@@ -4,6 +4,8 @@
 
 Monitoring service for EG4 solar inverters (6000XP via Modbus RTU). Single Rust binary serving a REST/WebSocket API and an embedded Preact web UI, with SQLite storage. Runs on a Raspberry Pi next to the inverter.
 
+**New here?** The [Setup Guide](docs/SETUP.md) walks through the RS485 wiring, installing the binary on a Pi, and first-run configuration with photos.
+
 ## Local Development
 
 The frontend must be built before the server can serve it (the dev server reads `web/dist/` from disk; there is no Vite proxy setup):
