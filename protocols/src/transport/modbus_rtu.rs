@@ -137,89 +137,139 @@ pub async fn get_or_spawn_port_actor(
     Ok(handle)
 }
 
+/// Minimum quiet time between transactions on the bus. The inverter MCU
+/// services the dongle UART at low priority; firing the next request the
+/// instant the previous response is parsed makes it occasionally drop one.
+const INTER_REQUEST_GAP: tokio::time::Duration = tokio::time::Duration::from_millis(50);
+
+/// The serial context plus the reliability policy around it: lazy open with
+/// spec re-resolution, an enforced inter-request gap, one retry per request,
+/// and drop-to-flush on both transport errors and timeouts. Dropping after a
+/// timeout matters for correctness, not just recovery: a late response has
+/// no address field and would otherwise be consumed as the answer to the
+/// *next* request, silently misattributing register data.
+type BoxedCall<'a, T> = std::pin::Pin<
+    Box<
+        dyn Future<Output = Result<Result<T, tokio_modbus::ExceptionCode>, tokio_modbus::Error>>
+            + Send
+            + 'a,
+    >,
+>;
+
+struct PortIo {
+    spec: String,
+    baud: u32,
+    timeout_secs: u64,
+    ctx: Option<tokio_modbus::client::Context>,
+    last_io: tokio::time::Instant,
+}
+
+impl PortIo {
+    fn new(spec: String, baud: u32, timeout_secs: u64) -> Self {
+        Self {
+            spec,
+            baud,
+            timeout_secs,
+            ctx: None,
+            last_io: tokio::time::Instant::now() - INTER_REQUEST_GAP,
+        }
+    }
+
+    // Re-resolve the spec on every open: a `usb-serial:<SN>` spec finds the
+    // adapter's current device node even after a replug renumbered it.
+    fn open(&self) -> anyhow::Result<tokio_modbus::client::Context> {
+        use tokio_serial::{DataBits, Parity, SerialStream, StopBits};
+        let path = super::ports::resolve_port_spec(&self.spec)?;
+        let builder = tokio_serial::new(&path, self.baud)
+            .data_bits(DataBits::Eight)
+            .parity(Parity::None)
+            .stop_bits(StopBits::One)
+            .timeout(std::time::Duration::from_secs(self.timeout_secs));
+        let port = SerialStream::open(&builder)?;
+        tracing::info!(
+            "opened serial port {path} ({}) at {} baud",
+            self.spec,
+            self.baud
+        );
+        Ok(tokio_modbus::prelude::rtu::attach(port))
+    }
+
+    async fn transact<T>(
+        &mut self,
+        unit_id: u8,
+        // A plain `AsyncFnMut` bound trips "implementation is not general
+        // enough" here because the actor future must be Send; box explicitly.
+        mut call: impl for<'a> FnMut(&'a mut tokio_modbus::client::Context) -> BoxedCall<'a, T>,
+    ) -> anyhow::Result<T> {
+        use tokio_modbus::prelude::*;
+
+        let mut retried = false;
+        loop {
+            let ctx = match &mut self.ctx {
+                Some(c) => c,
+                None => {
+                    let c = self
+                        .open()
+                        .map_err(|e| anyhow::anyhow!("failed to open {}: {e}", self.spec))?;
+                    self.ctx.insert(c)
+                }
+            };
+            tokio::time::sleep_until(self.last_io + INTER_REQUEST_GAP).await;
+            ctx.set_slave(Slave(unit_id));
+            let out = tokio::time::timeout(
+                tokio::time::Duration::from_secs(self.timeout_secs),
+                call(ctx),
+            )
+            .await;
+            self.last_io = tokio::time::Instant::now();
+            match out {
+                // Modbus-level exceptions come back through the inner Result;
+                // the device answered, so the port is healthy.
+                Ok(Ok(inner)) => return inner.map_err(|e| anyhow::anyhow!(e)),
+                Ok(Err(e)) => {
+                    tracing::warn!(
+                        "serial port {} transport error; reopening on next request",
+                        self.spec
+                    );
+                    self.ctx = None;
+                    return Err(anyhow::anyhow!(e));
+                }
+                Err(_) => {
+                    // Drop the port to flush the response if it arrives late.
+                    self.ctx = None;
+                    if retried {
+                        return Err(anyhow::anyhow!("timeout"));
+                    }
+                    retried = true;
+                    tracing::debug!("request on {} timed out; retrying once", self.spec);
+                }
+            }
+        }
+    }
+}
+
 async fn run_port_actor(
     path: String,
     baud: u32,
     timeout_secs: u64,
     mut rx: tokio::sync::mpsc::Receiver<PortRequest>,
 ) {
-    use tokio::time::{Duration, timeout};
-    use tokio_modbus::client::Context;
-    use tokio_modbus::prelude::rtu;
-    use tokio_modbus::prelude::*;
-    use tokio_serial::{DataBits, Parity, SerialStream, StopBits};
+    use tokio_modbus::client::{Reader, Writer};
 
-    // Re-resolve the spec on every open: a `usb-serial:<SN>` spec finds the
-    // adapter's current device node even after a replug renumbered it.
-    let open = |spec: &str| -> anyhow::Result<Context> {
-        let path = super::ports::resolve_port_spec(spec)?;
-        let builder = tokio_serial::new(&path, baud)
-            .data_bits(DataBits::Eight)
-            .parity(Parity::None)
-            .stop_bits(StopBits::One)
-            .timeout(std::time::Duration::from_secs(timeout_secs));
-        let port = SerialStream::open(&builder)?;
-        tracing::info!("opened serial port {path} ({spec}) at {baud} baud");
-        Ok(rtu::attach(port))
-    };
-
-    // Classify a call outcome: a transport-level error (outer Err, e.g. EIO
-    // from a stale fd after a USB replug) means the port must be reopened;
-    // a Modbus exception or timeout does not.
-    fn classify<T>(
-        out: Result<
-            Result<Result<T, tokio_modbus::ExceptionCode>, tokio_modbus::Error>,
-            tokio::time::error::Elapsed,
-        >,
-    ) -> (anyhow::Result<T>, bool) {
-        match out {
-            Ok(Ok(inner)) => (inner.map_err(|e| anyhow::anyhow!(e)), false),
-            Ok(Err(e)) => (Err(anyhow::anyhow!(e)), true),
-            Err(_) => (Err(anyhow::anyhow!("timeout")), false),
-        }
-    }
-
-    // The port is opened lazily and dropped after a transport error, so a
-    // replugged USB adapter recovers on the next request instead of the
-    // actor holding a stale fd forever.
-    let mut ctx: Option<Context> = None;
-    let dur = Duration::from_secs(timeout_secs);
+    let mut io = PortIo::new(path, baud, timeout_secs);
 
     while let Some(msg) = rx.recv().await {
-        if ctx.is_none() {
-            match open(&path) {
-                Ok(c) => ctx = Some(c),
-                Err(e) => {
-                    let err = anyhow::anyhow!("failed to open {path}: {e}");
-                    match msg {
-                        PortRequest::ReadInput { resp, .. } => {
-                            let _ = resp.send(Err(err));
-                        }
-                        PortRequest::ReadHolding { resp, .. } => {
-                            let _ = resp.send(Err(err));
-                        }
-                        PortRequest::WriteSingleRegister { resp, .. } => {
-                            let _ = resp.send(Err(err));
-                        }
-                    }
-                    continue;
-                }
-            }
-        }
-        let c = ctx.as_mut().expect("port opened above");
-
-        let reopen = match msg {
+        match msg {
             PortRequest::ReadInput {
                 unit_id,
                 addr,
                 qty,
                 resp,
             } => {
-                // Switch slave then read
-                c.set_slave(Slave(unit_id));
-                let (res, reopen) = classify(timeout(dur, c.read_input_registers(addr, qty)).await);
+                let res = io
+                    .transact(unit_id, |ctx| Box::pin(ctx.read_input_registers(addr, qty)))
+                    .await;
                 let _ = resp.send(res);
-                reopen
             }
             PortRequest::ReadHolding {
                 unit_id,
@@ -227,11 +277,12 @@ async fn run_port_actor(
                 qty,
                 resp,
             } => {
-                c.set_slave(Slave(unit_id));
-                let (res, reopen) =
-                    classify(timeout(dur, c.read_holding_registers(addr, qty)).await);
+                let res = io
+                    .transact(unit_id, |ctx| {
+                        Box::pin(ctx.read_holding_registers(addr, qty))
+                    })
+                    .await;
                 let _ = resp.send(res);
-                reopen
             }
             PortRequest::WriteSingleRegister {
                 unit_id,
@@ -239,16 +290,15 @@ async fn run_port_actor(
                 value,
                 resp,
             } => {
-                c.set_slave(Slave(unit_id));
-                let (res, reopen) =
-                    classify(timeout(dur, c.write_single_register(addr, value)).await);
+                // Retrying a timed-out write is safe: writing the same value
+                // to the same register is idempotent.
+                let res = io
+                    .transact(unit_id, |ctx| {
+                        Box::pin(ctx.write_single_register(addr, value))
+                    })
+                    .await;
                 let _ = resp.send(res.map(|_| ()));
-                reopen
             }
-        };
-        if reopen {
-            tracing::warn!("serial port {path} transport error; reopening on next request");
-            ctx = None;
         }
     }
 }
