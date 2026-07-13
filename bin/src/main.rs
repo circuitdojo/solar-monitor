@@ -106,10 +106,7 @@ async fn main() -> Result<()> {
                 .filter(|s| !s.is_empty())
                 .collect()
         } else {
-            match serialport::available_ports() {
-                Ok(p) => p.into_iter().map(|p| p.port_name).collect(),
-                Err(_) => Vec::new(),
-            }
+            solar_monitor_protocols::transport::ports::list_port_specs()
         };
         if ports.is_empty() {
             println!(

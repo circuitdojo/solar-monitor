@@ -165,11 +165,7 @@ async fn handle_ws(state: Arc<AppState>, mut socket: WebSocket) {
 }
 
 async fn list_serial_ports() -> Json<Vec<String>> {
-    let ports = match serialport::available_ports() {
-        Ok(p) => p.into_iter().map(|p| p.port_name).collect(),
-        Err(_) => Vec::new(),
-    };
-    Json(ports)
+    Json(solar_monitor_protocols::transport::ports::list_port_specs())
 }
 
 #[derive(Debug, Deserialize)]

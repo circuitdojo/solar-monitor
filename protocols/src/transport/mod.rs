@@ -2,3 +2,4 @@
 //! serializes all requests, so multiple devices (unit IDs) can share a bus.
 
 pub mod modbus_rtu;
+pub mod ports;

@@ -13,6 +13,7 @@ solar-monitor-core = { path = "../core" }
 contracts = { path = "../contracts" }
 solar-monitor-storage = { path = "../storage" }
 solar-monitor-notify = { path = "../notify" }
+solar-monitor-protocols = { path = "../protocols" }
 axum = { version = "0.8", default-features = false, features = [
     "macros",
     "ws",
@@ -22,8 +23,7 @@ axum = { version = "0.8", default-features = false, features = [
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 anyhow = "1.0"
-serialport = { version = "4.4", default-features = false }
-tokio = { version = "1.37", features = ["rt-multi-thread", "macros", "time"] }
+tokio ={ version = "1.37", features = ["rt-multi-thread", "macros", "time"] }
 tracing = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 tower-http = { version = "0.6", features = ["fs"] }
@@ -39,7 +39,6 @@ optional = true
 version = "8"
 
 [dev-dependencies]
-solar-monitor-protocols = { path = "../protocols" }
 tower = "0.5"
 http-body-util = "0.1"
 tempfile = "3"
