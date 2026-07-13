@@ -4,6 +4,17 @@ All notable changes to Solar Monitor are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.3] - 2026-07-13
+
+### Changed
+
+- Hardware-risky settings now carry their own confirmation warning instead
+  of one hardcoded UI message. `eps_voltage`, `eps_frequency`,
+  `charge_voltage`, and `equalization_voltage` join `inverter_state` and
+  `eps_enabled` as confirm-gated writes. `DeviceSettingDto.requiresConfirm`
+  (bool) is replaced by `confirm` (warning string, or null) — an
+  API/TypeScript wire change.
+
 ## [0.4.2] - 2026-07-13
 
 ### Changed
