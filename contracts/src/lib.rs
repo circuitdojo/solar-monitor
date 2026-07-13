@@ -143,8 +143,9 @@ pub struct TestConnectionResponseDto {
 
 #[derive(Type, Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+/// Create/update payload for a device. The device id is never client-chosen:
+/// POST mints a UUID and returns it; PUT takes the id from the URL path.
 pub struct AddDeviceRequestDto {
-    pub id: String,
     pub name: String,
     pub device_type: DeviceType,
     pub protocol_name: String,

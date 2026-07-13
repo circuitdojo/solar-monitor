@@ -110,7 +110,6 @@ function DeviceModal({ device, onClose, onSaved }: DeviceModalProps) {
   const editing = device != null
   const [serialPorts, setSerialPorts] = useState<string[]>([])
   const [protocols, setProtocols] = useState<ProtocolInfoDto[]>([])
-  const [id, setId] = useState(device?.id ?? '')
   const [name, setName] = useState(device?.name ?? '')
   const [deviceType, setDeviceType] = useState<DeviceListItemDto['deviceType']>(device?.deviceType ?? 'solarInverter')
   const [protocolName, setProtocolName] = useState(device?.protocolName ?? '')
@@ -136,7 +135,7 @@ function DeviceModal({ device, onClose, onSaved }: DeviceModalProps) {
   async function save() {
     setSaving(true); setError(null)
     const body = {
-      id, name,
+      name,
       deviceType,
       protocolName,
       enabled,
@@ -164,9 +163,6 @@ function DeviceModal({ device, onClose, onSaved }: DeviceModalProps) {
         </div>
         <div class="p-4 space-y-3">
           <div class="grid grid-cols-2 gap-3">
-            <Field label="ID">
-              <input class="vz-input" value={id} disabled={editing} onInput={(e: any) => setId(e.target.value)} />
-            </Field>
             <Field label="Name">
               <input class="vz-input" value={name} onInput={(e: any) => setName(e.target.value)} />
             </Field>

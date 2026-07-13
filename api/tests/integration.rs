@@ -266,6 +266,15 @@ async fn get(app: &Router, uri: &str) -> axum::response::Response {
         .unwrap()
 }
 
+/// POST a device create request and return the server-minted id.
+async fn create_device(app: &Router, body: serde_json::Value) -> String {
+    let res = post_json(app, "/api/v1/devices", body).await;
+    assert!(res.status().is_success());
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    v["id"].as_str().unwrap().to_string()
+}
+
 #[tokio::test]
 async fn devices_crud_and_errors() {
     let app = test_app(":memory:").await;
@@ -277,9 +286,8 @@ async fn devices_crud_and_errors() {
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert!(v.get("error").is_some());
 
-    // Create device via PUT upsert (disabled)
+    // Create device via POST; the server mints the id
     let create_body = json!({
-        "id": "dev1",
         "name": "Inverter A",
         "deviceType": "solarInverter",
         "protocolName": "eg4-6000xp-modbus",
@@ -287,20 +295,18 @@ async fn devices_crud_and_errors() {
         "pollIntervalSeconds": 30,
         "connectionParams": {"serial_port": "/dev/ttyS1", "baud_rate": "9600"}
     });
-    let res = put_json(&app, "/api/v1/devices/dev1", create_body).await;
-    assert!(res.status().is_success());
+    let id = create_device(&app, create_body).await;
 
     // Get device
-    let res = get(&app, "/api/v1/devices/dev1").await;
+    let res = get(&app, &format!("/api/v1/devices/{id}")).await;
     assert!(res.status().is_success());
     let body = res.into_body().collect().await.unwrap().to_bytes();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(v["id"], "dev1");
+    assert_eq!(v["id"], id.as_str());
     assert_eq!(v["enabled"], false);
 
     // Update device (rename, keep disabled to avoid polling)
     let put_body = json!({
-        "id": "dev1",
         "name": "Inverter A2",
         "deviceType": "solarInverter",
         "protocolName": "eg4-6000xp-modbus",
@@ -308,24 +314,28 @@ async fn devices_crud_and_errors() {
         "pollIntervalSeconds": 60,
         "connectionParams": {"serial_port": "/dev/ttyS1", "baud_rate": "9600"}
     });
-    let res = put_json(&app, "/api/v1/devices/dev1", put_body).await;
+    let res = put_json(&app, &format!("/api/v1/devices/{id}"), put_body.clone()).await;
     assert!(res.status().is_success());
 
-    let res = get(&app, "/api/v1/devices/dev1").await;
+    // PUT is update-only: an unknown id must 404, not create
+    let res = put_json(&app, "/api/v1/devices/no-such-device", put_body).await;
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+
+    let res = get(&app, &format!("/api/v1/devices/{id}")).await;
     let body = res.into_body().collect().await.unwrap().to_bytes();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(v["name"], "Inverter A2");
     assert_eq!(v["pollIntervalSeconds"], 60);
 
     // Latest data (none)
-    let res = get(&app, "/api/v1/devices/dev1/data/latest").await;
+    let res = get(&app, &format!("/api/v1/devices/{id}/data/latest")).await;
     assert!(res.status().is_success());
     let body = res.into_body().collect().await.unwrap().to_bytes();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert!(v.is_null());
 
     // Range (empty)
-    let res = get(&app, "/api/v1/devices/dev1/data").await;
+    let res = get(&app, &format!("/api/v1/devices/{id}/data")).await;
     assert!(res.status().is_success());
     let body = res.into_body().collect().await.unwrap().to_bytes();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -342,9 +352,9 @@ async fn devices_crud_and_errors() {
     assert_eq!(v.as_array().unwrap().len(), 1);
 
     // Delete device
-    let res = delete(&app, "/api/v1/devices/dev1").await;
+    let res = delete(&app, &format!("/api/v1/devices/{id}")).await;
     assert!(res.status().is_success());
-    let res = get(&app, "/api/v1/devices/dev1").await;
+    let res = get(&app, &format!("/api/v1/devices/{id}")).await;
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }
 
@@ -352,10 +362,9 @@ async fn devices_crud_and_errors() {
 async fn settings_unknown_protocol_and_range_validation() {
     let app = test_app(":memory:").await;
 
-    // Upsert a disabled device with a protocol no longer in the registry
+    // Create a disabled device with a protocol no longer in the registry
     // (e.g. an orphaned row from the removed PI30 driver)
     let create_body = json!({
-        "id": "dev2",
         "name": "Inverter B",
         "deviceType": "solarInverter",
         "protocolName": "eg4-pi30-rs485",
@@ -363,8 +372,7 @@ async fn settings_unknown_protocol_and_range_validation() {
         "pollIntervalSeconds": 30,
         "connectionParams": {"serial_port": "/dev/ttyS9", "baud_rate": "9600"}
     });
-    let res = put_json(&app, "/api/v1/devices/dev2", create_body).await;
-    assert!(res.status().is_success());
+    let id = create_device(&app, create_body).await;
 
     // It still lists, but without settings support
     let res = get(&app, "/api/v1/devices").await;
@@ -374,12 +382,12 @@ async fn settings_unknown_protocol_and_range_validation() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|d| d["id"] == "dev2")
+        .find(|d| d["id"] == id.as_str())
         .unwrap();
     assert_eq!(dev["supportsSettings"], false);
 
     // Settings endpoint rejects the unknown protocol with a client error
-    let res = get(&app, "/api/v1/devices/dev2/settings").await;
+    let res = get(&app, &format!("/api/v1/devices/{id}/settings")).await;
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
     let body = res.into_body().collect().await.unwrap().to_bytes();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -425,11 +433,9 @@ async fn settings_404_and_discovery_empty() {
 async fn add_disabled_device_is_persisted() {
     let app = test_app(":memory:").await;
 
-    let res = post_json(
+    let id = create_device(
         &app,
-        "/api/v1/devices",
         json!({
-            "id": "devOff",
             "name": "Added disabled",
             "deviceType": "solarInverter",
             "protocolName": "eg4-6000xp-modbus",
@@ -439,14 +445,13 @@ async fn add_disabled_device_is_persisted() {
         }),
     )
     .await;
-    assert!(res.status().is_success());
 
     // The device must exist afterwards (previously it was silently dropped)
-    let res = get(&app, "/api/v1/devices/devOff").await;
+    let res = get(&app, &format!("/api/v1/devices/{id}")).await;
     assert!(res.status().is_success());
     let body = res.into_body().collect().await.unwrap().to_bytes();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(v["id"], "devOff");
+    assert_eq!(v["id"], id.as_str());
     assert_eq!(v["enabled"], false);
 }
 
@@ -457,7 +462,6 @@ async fn update_restarts_polling_task() {
 
     let body = |interval: u32| {
         json!({
-            "id": "devUpd",
             "name": "Mock",
             "deviceType": "solarInverter",
             "protocolName": "mock-proto",
@@ -466,29 +470,28 @@ async fn update_restarts_polling_task() {
             "connectionParams": {}
         })
     };
-    let res = put_json(&app, "/api/v1/devices/devUpd", body(5)).await;
-    assert!(res.status().is_success());
+    let id = create_device(&app, body(5)).await;
     let first = {
         let tasks = state.tasks.lock().await;
         assert_eq!(tasks.len(), 1);
         // JoinHandle identity via its raw id
-        format!("{:?}", tasks.get("devUpd").unwrap().id())
+        format!("{:?}", tasks.get(&id).unwrap().id())
     };
 
     // Update with a new interval: the old task must be replaced, not kept
-    let res = put_json(&app, "/api/v1/devices/devUpd", body(60)).await;
+    let res = put_json(&app, &format!("/api/v1/devices/{id}"), body(60)).await;
     assert!(res.status().is_success());
     let second = {
         let tasks = state.tasks.lock().await;
         assert_eq!(tasks.len(), 1);
-        format!("{:?}", tasks.get("devUpd").unwrap().id())
+        format!("{:?}", tasks.get(&id).unwrap().id())
     };
     assert_ne!(first, second, "polling task should be restarted on update");
 
     // Disabling stops the task
     let mut off = body(60);
     off["enabled"] = json!(false);
-    let res = put_json(&app, "/api/v1/devices/devUpd", off).await;
+    let res = put_json(&app, &format!("/api/v1/devices/{id}"), off).await;
     assert!(res.status().is_success());
     assert_eq!(state.tasks.lock().await.len(), 0);
 }
@@ -636,7 +639,6 @@ async fn enabling_creates_task_and_delete_aborts() {
 
     // Enable device with mock-proto
     let body = json!({
-        "id": "devX",
         "name": "Mock",
         "deviceType": "solarInverter",
         "protocolName": "mock-proto",
@@ -644,15 +646,14 @@ async fn enabling_creates_task_and_delete_aborts() {
         "pollIntervalSeconds": 5,
         "connectionParams": {}
     });
-    let res = put_json(&app, "/api/v1/devices/devX", body).await;
-    assert!(res.status().is_success());
+    let id = create_device(&app, body).await;
 
     // Task should appear
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     assert_eq!(state.tasks.lock().await.len(), 1);
 
     // Delete device and ensure task is removed
-    let res = delete(&app, "/api/v1/devices/devX").await;
+    let res = delete(&app, &format!("/api/v1/devices/{id}")).await;
     assert!(res.status().is_success());
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     assert_eq!(state.tasks.lock().await.len(), 0);
@@ -665,7 +666,6 @@ async fn settings_unsupported_by_protocol_returns_400() {
 
     // Create device with mock protocol (disabled); mock exposes no settings
     let body = json!({
-        "id": "devNoSettings",
         "name": "MockNoSettings",
         "deviceType": "solarInverter",
         "protocolName": "mock-proto",
@@ -673,10 +673,9 @@ async fn settings_unsupported_by_protocol_returns_400() {
         "pollIntervalSeconds": 5,
         "connectionParams": {}
     });
-    let res = put_json(&app, "/api/v1/devices/devNoSettings", body).await;
-    assert!(res.status().is_success());
+    let id = create_device(&app, body).await;
 
-    let res = get(&app, "/api/v1/devices/devNoSettings/settings").await;
+    let res = get(&app, &format!("/api/v1/devices/{id}/settings")).await;
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
     let body = res.into_body().collect().await.unwrap().to_bytes();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();

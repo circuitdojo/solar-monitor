@@ -10,7 +10,11 @@ export type DeviceData = { deviceId: string; timestamp: string; deviceType: Devi
 
 export type DeviceConfigDto = { id: string; name: string; deviceType: DeviceType; protocolName: string; enabled: boolean; pollIntervalSeconds: number; connectionParams: { [key: string]: string } }
 
-export type AddDeviceRequestDto = { id: string; name: string; deviceType: DeviceType; protocolName: string; enabled: boolean; pollIntervalSeconds: number; connectionParams: { [key: string]: string } }
+/**
+ * Create/update payload for a device. The device id is never client-chosen:
+ * POST mints a UUID and returns it; PUT takes the id from the URL path.
+ */
+export type AddDeviceRequestDto = { name: string; deviceType: DeviceType; protocolName: string; enabled: boolean; pollIntervalSeconds: number; connectionParams: { [key: string]: string } }
 
 export type DeviceListItemDto = { id: string; name: string; deviceType: DeviceType; protocolName: string; enabled: boolean; pollIntervalSeconds: number; connectionParams: { [key: string]: string }; isPolling: boolean; supportsSettings: boolean }
 

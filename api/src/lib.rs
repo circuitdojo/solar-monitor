@@ -259,9 +259,11 @@ async fn add_device(
     axum::extract::State(state): axum::extract::State<Arc<AppState>>,
     Json(req): Json<contracts::AddDeviceRequestDto>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    // Build core config
+    // Server-minted id: clients never choose it, so a create can't collide
+    // with (and silently overwrite) an existing device.
+    let id = uuid::Uuid::new_v4().to_string();
     let cfg = core::DeviceConfig {
-        id: req.id.clone(),
+        id: id.clone(),
         name: req.name.clone(),
         device_type: req.device_type,
         protocol: req.protocol_name.clone(),
@@ -280,7 +282,7 @@ async fn add_device(
     // Save to in-memory map
     {
         let mut devices = state.devices.lock().await;
-        devices.insert(req.id.clone(), cfg.clone());
+        devices.insert(id.clone(), cfg.clone());
     }
 
     // Spawn polling task
@@ -290,7 +292,7 @@ async fn add_device(
             .map_err(|e| ApiError::Internal(e.to_string()))?;
     }
 
-    Ok(Json(serde_json::json!({ "status": "ok", "id": req.id })))
+    Ok(Json(serde_json::json!({ "status": "ok", "id": id })))
 }
 
 async fn get_latest_data(
@@ -522,11 +524,15 @@ async fn update_device(
     axum::extract::Path(id): axum::extract::Path<String>,
     Json(req): Json<contracts::AddDeviceRequestDto>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    if id != req.id {
-        return Err(ApiError::BadRequest("id mismatch".into()));
-    }
+    // Update-only: creating happens via POST with a server-minted id.
+    state
+        .store
+        .get_device_config(&id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or_else(|| ApiError::NotFound("device not found".into()))?;
     let cfg = core::DeviceConfig {
-        id: req.id.clone(),
+        id: id.clone(),
         name: req.name.clone(),
         device_type: req.device_type,
         protocol: req.protocol_name.clone(),
