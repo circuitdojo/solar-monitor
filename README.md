@@ -147,7 +147,9 @@ GET /api/v1/devices/{id}/settings          # read all settings
 PUT /api/v1/devices/{id}/settings/{key}    # body {"value": "..."} — number, "true"/"false", or "HH:MM-HH:MM"
 ```
 
-The settings table lives in `protocols/src/eg4_settings.rs` — one table entry per setting (register, scale, documented range). Add new settings there; do not open raw register writes to the UI. The inverter standby/power-on bit is deliberately not exposed.
+The settings table lives in `protocols/src/luxpower/models/eg4_6000xp.rs` — one table entry per setting (register, scale, documented range). Add new settings there; do not open raw register writes to the UI.
+
+Disruptive or hardware-risky settings (inverter standby, backup output enable/voltage/frequency, charge and equalization voltage) carry a warning the web UI shows in a confirmation dialog before writing. Note that this confirmation is **UI-level only** — the `PUT` endpoint performs the write directly. The API has no authentication and is designed for a trusted LAN; anything that can reach it can change inverter settings.
 
 ## Workspace Layout
 

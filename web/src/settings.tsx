@@ -25,7 +25,7 @@ function SettingRow({ deviceId, s, onStored }: {
   const dirty = st.draft !== initial(s.setting)
 
   async function save(value: string) {
-    if (s.requiresConfirm && !confirm(`"${s.label}" can interrupt inverter output.\n\nWrite ${value} to the inverter now?`)) {
+    if (s.confirm && !confirm(`${s.confirm}\n\nWrite ${value} to "${s.label}" now?`)) {
       setSt(p => ({ ...p, draft: initial(s.setting) }))
       return
     }

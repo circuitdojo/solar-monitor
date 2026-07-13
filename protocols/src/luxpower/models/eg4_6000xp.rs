@@ -24,8 +24,37 @@ pub static EG4_6000XP: ModelDef = ModelDef {
     // The 6000XP Modbus interface (dongle port) runs at 19200; sweep 9600 as fallback
     discovery_bauds: &[19200, 9600],
     settings: SETTINGS,
-    // Writing either of these cuts output power — the UI must confirm first.
-    confirm_keys: &["inverter_state", "eps_enabled"],
+    // Disruptive or hardware-risky writes — the UI must confirm first.
+    confirm_keys: &[
+        (
+            "inverter_state",
+            "Switching the inverter state cuts output power.",
+        ),
+        (
+            "eps_enabled",
+            "Toggling backup output cuts power to backup loads.",
+        ),
+        (
+            "eps_voltage",
+            "Changing the backup output voltage can damage connected loads. \
+             Verify every backup load supports the new voltage.",
+        ),
+        (
+            "eps_frequency",
+            "Changing the backup output frequency can damage connected loads. \
+             Verify every backup load supports the new frequency.",
+        ),
+        (
+            "charge_voltage",
+            "Set strictly per your battery's documentation — too high can \
+             permanently damage batteries. Ignored for closed-loop lithium.",
+        ),
+        (
+            "equalization_voltage",
+            "Equalization is for flooded lead-acid only — running it on \
+             lithium or sealed batteries can permanently damage them.",
+        ),
+    ],
     decode_metrics,
 };
 
@@ -1412,10 +1441,15 @@ mod tests {
 
     #[test]
     fn confirm_keys_exist_in_table() {
-        for key in EG4_6000XP.confirm_keys {
+        for (key, msg) in EG4_6000XP.confirm_keys {
             assert!(
                 SETTINGS.iter().any(|d| d.key == *key),
                 "confirm key '{}' not in settings table",
+                key
+            );
+            assert!(
+                !msg.is_empty(),
+                "confirm key '{}' has an empty warning",
                 key
             );
         }

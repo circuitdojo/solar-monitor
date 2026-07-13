@@ -38,9 +38,10 @@ pub struct ModelDef {
     pub default_baud: u32,
     pub discovery_bauds: &'static [u32],
     pub settings: &'static [SettingDef],
-    /// Setting keys that are disruptive to write (e.g. cut output power);
-    /// surfaced to the UI as a required confirmation.
-    pub confirm_keys: &'static [&'static str],
+    /// Settings that are disruptive or hardware-risky to write, as
+    /// (key, warning) pairs; the warning is surfaced to the UI as a
+    /// required confirmation before the write.
+    pub confirm_keys: &'static [(&'static str, &'static str)],
     pub decode_metrics: fn(&InputBlocks) -> DeviceMetrics,
 }
 

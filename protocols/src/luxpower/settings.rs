@@ -78,7 +78,7 @@ fn parse_time(s: &str) -> Result<u16> {
 
 fn dto(
     def: &SettingDef,
-    requires_confirm: bool,
+    confirm: Option<&str>,
     regs: &dyn Fn(u16) -> u16,
 ) -> contracts::DeviceSettingDto {
     let setting = match &def.kind {
@@ -137,7 +137,7 @@ fn dto(
         key: def.key.to_string(),
         label: def.label.to_string(),
         group: def.group.to_string(),
-        requires_confirm,
+        confirm: confirm.map(str::to_string),
         setting,
     }
 }
@@ -148,7 +148,16 @@ pub struct LuxPowerSettings {
     pub(crate) handle: Arc<PortHandle>,
     pub(crate) unit_id: u8,
     pub(crate) table: &'static [SettingDef],
-    pub(crate) confirm_keys: &'static [&'static str],
+    pub(crate) confirm_keys: &'static [(&'static str, &'static str)],
+}
+
+impl LuxPowerSettings {
+    fn confirm_for(&self, key: &str) -> Option<&'static str> {
+        self.confirm_keys
+            .iter()
+            .find(|(k, _)| *k == key)
+            .map(|(_, msg)| *msg)
+    }
 }
 
 #[async_trait]
@@ -188,7 +197,7 @@ impl solar_monitor_core::SettingsAccess for LuxPowerSettings {
         Ok(self
             .table
             .iter()
-            .map(|d| dto(d, self.confirm_keys.contains(&d.key), &regs))
+            .map(|d| dto(d, self.confirm_for(d.key), &regs))
             .collect())
     }
 
@@ -314,6 +323,6 @@ impl solar_monitor_core::SettingsAccess for LuxPowerSettings {
             vals.insert(a, v);
         }
         let regs = move |addr: u16| -> u16 { *vals.get(&addr).unwrap_or(&0) };
-        Ok(dto(def, self.confirm_keys.contains(&def.key), &regs))
+        Ok(dto(def, self.confirm_for(def.key), &regs))
     }
 }
