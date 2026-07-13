@@ -172,6 +172,11 @@ cargo clippy --workspace --all-features
 
 GPL-3.0-or-later — see [LICENSE](LICENSE).
 
+This software interacts with inverter and battery configuration registers and is provided
+**as is, with no warranty of any kind, express or implied** — see LICENSE sections 15 and 16.
+Use at your own risk; verify any setting change against your inverter's documentation before
+applying it.
+
 The EG4/LuxPower Modbus register documentation this project was built against
 ("6kXP-Modbus updated on 2023.10.28") is vendor-copyrighted and **not**
 redistributed here. The settings table in
