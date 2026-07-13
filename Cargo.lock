@@ -388,7 +388,7 @@ checksum = "c2459377285ad874054d797f3ccebf984978aa39129f6eafde5cdc8315b612f8"
 
 [[package]]
 name = "contracts"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "chrono",
  "serde",
@@ -2185,7 +2185,7 @@ dependencies = [
 
 [[package]]
 name = "solar-monitor"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -2205,7 +2205,7 @@ dependencies = [
 
 [[package]]
 name = "solar-monitor-api"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2231,7 +2231,7 @@ dependencies = [
 
 [[package]]
 name = "solar-monitor-core"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2243,7 +2243,7 @@ dependencies = [
 
 [[package]]
 name = "solar-monitor-notify"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2258,7 +2258,7 @@ dependencies = [
 
 [[package]]
 name = "solar-monitor-protocols"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2275,7 +2275,7 @@ dependencies = [
 
 [[package]]
 name = "solar-monitor-storage"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "chrono",
