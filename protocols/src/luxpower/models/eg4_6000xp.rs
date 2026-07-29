@@ -1527,6 +1527,8 @@ mod tests {
             (4, 532),    // vbat = 53.2 V
             (5, 0x6247), // SOC 0x47=71, SOH 0x62=98
             (7, 1200),   // ppv1 = 1200 W
+            (10, 1350),  // pcharge = 1350 W
+            (11, 25),    // pdischarge = 25 W
             (12, 2401),  // vac_r = 240.1 V
             (15, 5998),  // fac = 59.98 Hz
             (16, 800),   // pinv = 800 W
@@ -1551,6 +1553,8 @@ mod tests {
         assert_eq!(m.pv_power_watts, Some(1200.0));
         assert_eq!(m.output_power_watts, Some(650.0));
         assert_eq!(m.battery_current, Some(25.0));
+        assert_eq!(m.custom_metrics.get("battery_charge_power"), Some(&1350.0));
+        assert_eq!(m.custom_metrics.get("battery_discharge_power"), Some(&25.0));
         assert_eq!(m.device_temperature_celsius, Some(45.0));
         // Grid input: generator metrics must be gated off
         assert_eq!(m.custom_metrics.get("ac_input_is_generator"), Some(&0.0));

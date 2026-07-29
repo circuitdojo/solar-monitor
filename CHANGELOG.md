@@ -4,6 +4,19 @@ All notable changes to Solar Monitor are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.6] - 2026-07-29
+
+### Fixed
+
+- Pending notification retries are superseded by newer transitions for the
+  same rule, device, and channel, preventing a delayed grid-lost alert from
+  arriving after grid restoration. Retries also resolve the latest channel
+  configuration before each attempt and stop when their rule or channel is
+  disabled, deleted, or unlinked.
+- The dashboard falls back to battery voltage × current for historical data
+  and protocols that do not provide the direct `Pcharge`/`Pdischarge` custom
+  metrics, rather than incorrectly showing the battery as idle.
+
 ## [0.4.5] - 2026-07-29
 
 ### Fixed

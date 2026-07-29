@@ -119,7 +119,6 @@ fn hysteresis(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
 
     fn rule(event: NotificationEvent, params: &[(&str, f64)]) -> NotificationRuleDto {
         NotificationRuleDto {

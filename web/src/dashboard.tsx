@@ -340,8 +340,13 @@ function FlowStrip({ s }: { s: Sample }) {
   const pvW = s.pv ?? 0
   const imp = s.custom['import_power'] ?? 0
   const exp = s.custom['export_power'] ?? 0
-  // Inverter reports charge/discharge power in watts directly; positive = charging.
-  const battW = (s.custom['battery_charge_power'] ?? 0) - (s.custom['battery_discharge_power'] ?? 0)
+  // Prefer the inverter's direct watt readings. Older persisted samples and
+  // protocols without them fall back to battery voltage × signed current.
+  const chargeW = s.custom['battery_charge_power']
+  const dischargeW = s.custom['battery_discharge_power']
+  const battW = chargeW != null && dischargeW != null
+    ? chargeW - dischargeW
+    : s.vbat != null && s.ibat != null ? s.vbat * s.ibat : null
   const node = (color: string, name: string, detail: string) => (
     <div class="flex items-center gap-2">
       <span class="inline-block rounded-full" style={{ width: '10px', height: '10px', background: color }} />
@@ -362,7 +367,7 @@ function FlowStrip({ s }: { s: Sample }) {
       {node(
         'var(--vz-batt)',
         'Battery',
-        Math.abs(battW) < 15 ? 'idle' : battW > 0 ? `charging ${fmtW(battW)}` : `discharging ${fmtW(-battW)}`,
+        battW == null ? '—' : Math.abs(battW) < 15 ? 'idle' : battW > 0 ? `charging ${fmtW(battW)}` : `discharging ${fmtW(-battW)}`,
       )}
       {s.custom['ac_input_is_generator'] === 1 && (
         <>

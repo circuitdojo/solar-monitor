@@ -43,6 +43,15 @@ struct RuleState {
     last_fired: HashMap<bool, Instant>,
 }
 
+/// Identifies one stream of deliveries. A newer transition for the same
+/// rule/device/channel supersedes any older notification still being retried.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct RetryKey {
+    rule_id: String,
+    device_id: Option<String>,
+    channel_id: String,
+}
+
 pub struct Notifier {
     store: Arc<DataStore>,
     config: RwLock<(Vec<NotificationChannelDto>, Vec<NotificationRuleDto>)>,
@@ -50,6 +59,9 @@ pub struct Notifier {
     states: Mutex<HashMap<(String, String), RuleState>>,
     /// Device id -> (last data arrival, device considered offline)
     last_seen: Mutex<HashMap<String, (Instant, bool)>>,
+    /// Monotonically increasing generation for each delivery stream. Retry
+    /// tasks stop when a newer transition advances their generation.
+    retry_generations: Mutex<HashMap<RetryKey, u64>>,
     http: reqwest::Client,
 }
 
@@ -62,6 +74,7 @@ impl Notifier {
             config: RwLock::new((channels, rules)),
             states: Mutex::new(HashMap::new()),
             last_seen: Mutex::new(HashMap::new()),
+            retry_generations: Mutex::new(HashMap::new()),
             http: reqwest::Client::builder()
                 .timeout(Duration::from_secs(15))
                 .build()
@@ -262,6 +275,12 @@ impl Notifier {
             .iter()
             .filter(|c| c.enabled && rule.channel_ids.contains(&c.id))
         {
+            let retry_key = RetryKey {
+                rule_id: rule.id.clone(),
+                device_id: device_id.map(str::to_owned),
+                channel_id: ch.id.clone(),
+            };
+            let retry_generation = self.begin_delivery(&retry_key).await;
             let result = channels::send(&self.http, ch, &note).await;
             let retryable = match &result {
                 Err(e) => {
@@ -300,24 +319,83 @@ impl Notifier {
                 }
             };
             if retryable {
-                Arc::clone(self).spawn_retry(ch.clone(), note.clone(), rule.name.clone(), log_id);
+                Arc::clone(self).spawn_retry(
+                    retry_key,
+                    retry_generation,
+                    note.clone(),
+                    rule.name.clone(),
+                    ch.name.clone(),
+                    log_id,
+                );
             }
         }
+    }
+
+    /// Advance a delivery stream so any older transition still waiting to
+    /// retry becomes stale before this transition is sent.
+    async fn begin_delivery(&self, key: &RetryKey) -> u64 {
+        let mut generations = self.retry_generations.lock().await;
+        let generation = generations.entry(key.clone()).or_default();
+        *generation = generation
+            .checked_add(1)
+            .expect("retry generation overflow");
+        *generation
+    }
+
+    /// Resolve the latest enabled channel configuration before every retry.
+    /// Returns `None` when a newer transition superseded this one, or when the
+    /// rule/channel was disabled, deleted, or unlinked in the meantime.
+    async fn current_retry_channel(
+        &self,
+        key: &RetryKey,
+        generation: u64,
+    ) -> Option<NotificationChannelDto> {
+        if self.retry_generations.lock().await.get(key).copied() != Some(generation) {
+            return None;
+        }
+
+        let (channels, rules) = &*self.config.read().await;
+        let rule = rules
+            .iter()
+            .find(|rule| rule.id == key.rule_id && rule.enabled)?;
+        if !rule.channel_ids.contains(&key.channel_id) {
+            return None;
+        }
+        channels
+            .iter()
+            .find(|channel| channel.id == key.channel_id && channel.enabled)
+            .cloned()
     }
 
     /// Keep re-sending a delivery that failed for a transient reason, amending
     /// its log entry with the eventual outcome.
     fn spawn_retry(
         self: Arc<Self>,
-        channel: NotificationChannelDto,
+        key: RetryKey,
+        generation: u64,
         note: Notification,
         rule_name: String,
+        initial_channel_name: String,
         log_id: Option<i64>,
     ) {
         tokio::spawn(async move {
             let mut last_error = String::new();
             for (i, delay) in RETRY_DELAYS.iter().enumerate() {
                 tokio::time::sleep(*delay).await;
+                let Some(channel) = self.current_retry_channel(&key, generation).await else {
+                    tracing::info!(
+                        "notification '{}' retry via '{}' cancelled (superseded or disabled)",
+                        rule_name,
+                        initial_channel_name
+                    );
+                    self.amend_log(
+                        log_id,
+                        false,
+                        Some("retry cancelled: superseded or channel/rule disabled"),
+                    )
+                    .await;
+                    return;
+                };
                 let attempt = i + 2; // the inline send was attempt 1
                 match channels::send(&self.http, &channel, &note).await {
                     Ok(()) => {
@@ -368,5 +446,66 @@ impl Notifier {
         {
             tracing::warn!("failed to update notification log entry: {}", e);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    use contracts::{NotificationChannelKind, NotificationEvent, NotificationRuleDto};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn retries_are_superseded_and_use_current_channel_config() {
+        let store = Arc::new(DataStore::new(":memory:").await.unwrap());
+        let mut channel = NotificationChannelDto {
+            id: "hook".into(),
+            name: "Hook".into(),
+            kind: NotificationChannelKind::Webhook,
+            config: HashMap::from([("url".into(), "https://old.example".into())]),
+            enabled: true,
+        };
+        store.upsert_notification_channel(&channel).await.unwrap();
+        store
+            .upsert_notification_rule(&NotificationRuleDto {
+                id: "grid".into(),
+                name: "Grid".into(),
+                event: NotificationEvent::GridState,
+                device_id: None,
+                params: HashMap::new(),
+                channel_ids: vec![channel.id.clone()],
+                enabled: true,
+                cooldown_seconds: 0,
+            })
+            .await
+            .unwrap();
+
+        let notifier = Notifier::new(Arc::clone(&store)).await.unwrap();
+        let key = RetryKey {
+            rule_id: "grid".into(),
+            device_id: Some("inv1".into()),
+            channel_id: channel.id.clone(),
+        };
+        let first = notifier.begin_delivery(&key).await;
+
+        channel
+            .config
+            .insert("url".into(), "https://new.example".into());
+        store.upsert_notification_channel(&channel).await.unwrap();
+        notifier.reload().await.unwrap();
+        let refreshed = notifier.current_retry_channel(&key, first).await.unwrap();
+        assert_eq!(refreshed.config["url"], "https://new.example");
+
+        let second = notifier.begin_delivery(&key).await;
+        assert!(notifier.current_retry_channel(&key, first).await.is_none());
+        assert!(notifier.current_retry_channel(&key, second).await.is_some());
+
+        channel.enabled = false;
+        store.upsert_notification_channel(&channel).await.unwrap();
+        notifier.reload().await.unwrap();
+        assert!(notifier.current_retry_channel(&key, second).await.is_none());
     }
 }
