@@ -200,7 +200,7 @@ export function NotificationsPage() {
                 </div>
                 <div class="text-xs mt-0.5" style={{ color: 'var(--vz-ink-3)' }}>
                   {e.body}
-                  {!e.ok && e.error && <span style={{ color: 'var(--vz-crit)' }}> — {e.error}</span>}
+                  {e.error && <span style={{ color: e.ok ? 'var(--vz-ink-3)' : 'var(--vz-crit)' }}> — {e.error}</span>}
                 </div>
               </div>
               <div class="text-xs text-right shrink-0" style={{ color: 'var(--vz-ink-3)' }}>

@@ -469,11 +469,13 @@ impl DataStore {
     /// Retention cap: newest rows kept, oldest pruned on insert.
     const NOTIFICATION_LOG_CAP: i64 = 1000;
 
+    /// Returns the id of the inserted row (used to amend the outcome when a
+    /// retried delivery later succeeds).
     pub async fn append_notification_log(
         &self,
         entry: &contracts::NotificationLogEntryDto,
-    ) -> Result<()> {
-        sqlx::query(
+    ) -> Result<i64> {
+        let id = sqlx::query(
             r#"
             INSERT INTO notification_log
                 (timestamp, rule_id, rule_name, device_id, title, body,
@@ -492,7 +494,8 @@ impl DataStore {
         .bind(entry.ok as i32)
         .bind(&entry.error)
         .execute(&self.pool)
-        .await?;
+        .await?
+        .last_insert_rowid();
         sqlx::query(
             "DELETE FROM notification_log WHERE id NOT IN
              (SELECT id FROM notification_log ORDER BY id DESC LIMIT ?)",
@@ -500,6 +503,23 @@ impl DataStore {
         .bind(Self::NOTIFICATION_LOG_CAP)
         .execute(&self.pool)
         .await?;
+        Ok(id)
+    }
+
+    /// Amend a log entry's outcome — a delivery that failed on the first
+    /// attempt and succeeded (or finally gave up) on a retry.
+    pub async fn update_notification_log_result(
+        &self,
+        id: i64,
+        ok: bool,
+        error: Option<&str>,
+    ) -> Result<()> {
+        sqlx::query("UPDATE notification_log SET ok = ?, error = ? WHERE id = ?")
+            .bind(ok as i32)
+            .bind(error)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 

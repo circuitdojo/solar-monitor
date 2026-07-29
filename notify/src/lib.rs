@@ -16,10 +16,25 @@ use tokio::sync::{Mutex, RwLock, broadcast};
 
 use events::{Transition, evaluate};
 
+#[derive(Clone)]
 pub struct Notification {
     pub title: String,
     pub body: String,
 }
+
+/// Backoff for retryable delivery failures (~38 min of coverage). A grid
+/// outage takes the router down with it, so the alert about it is exactly the
+/// one that can't get out on the first try — keep trying until the network is
+/// back rather than dropping the most important notification on the floor.
+const RETRY_DELAYS: [Duration; 7] = [
+    Duration::from_secs(30),
+    Duration::from_secs(60),
+    Duration::from_secs(120),
+    Duration::from_secs(300),
+    Duration::from_secs(600),
+    Duration::from_secs(600),
+    Duration::from_secs(600),
+];
 
 struct RuleState {
     /// Last observed condition (None until first sample: baseline silently)
@@ -73,6 +88,7 @@ impl Notifier {
             },
         )
         .await
+        .map_err(|e| e.error)
     }
 
     /// Spawn the engine: consumes live data and runs the offline ticker.
@@ -93,7 +109,7 @@ impl Notifier {
         });
     }
 
-    async fn on_data(&self, data: &DeviceData) {
+    async fn on_data(self: &Arc<Self>, data: &DeviceData) {
         // Offline bookkeeping: arrival marks the device online again
         let came_back = {
             let mut seen = self.last_seen.lock().await;
@@ -183,7 +199,7 @@ impl Notifier {
         true
     }
 
-    async fn check_offline(&self) {
+    async fn check_offline(self: &Arc<Self>) {
         let (channels, rules) = &*self.config.read().await;
         let offline_rules: Vec<&NotificationRuleDto> = rules
             .iter()
@@ -232,7 +248,7 @@ impl Notifier {
     }
 
     async fn dispatch(
-        &self,
+        self: &Arc<Self>,
         rule: &NotificationRuleDto,
         channels: &[NotificationChannelDto],
         t: &Transition,
@@ -247,15 +263,22 @@ impl Notifier {
             .filter(|c| c.enabled && rule.channel_ids.contains(&c.id))
         {
             let result = channels::send(&self.http, ch, &note).await;
-            match &result {
-                Err(e) => tracing::warn!(
-                    "notification '{}' via channel '{}' failed: {}",
-                    rule.name,
-                    ch.name,
-                    e
-                ),
-                Ok(()) => tracing::info!("notification '{}' sent via '{}'", rule.name, ch.name),
-            }
+            let retryable = match &result {
+                Err(e) => {
+                    tracing::warn!(
+                        "notification '{}' via channel '{}' failed: {}{}",
+                        rule.name,
+                        ch.name,
+                        e,
+                        if e.retryable { " (will retry)" } else { "" }
+                    );
+                    e.retryable
+                }
+                Ok(()) => {
+                    tracing::info!("notification '{}' sent via '{}'", rule.name, ch.name);
+                    false
+                }
+            };
             let entry = contracts::NotificationLogEntryDto {
                 id: 0, // assigned by the database
                 timestamp: chrono::Utc::now(),
@@ -269,9 +292,81 @@ impl Notifier {
                 ok: result.is_ok(),
                 error: result.err().map(|e| e.to_string()),
             };
-            if let Err(e) = self.store.append_notification_log(&entry).await {
-                tracing::warn!("failed to record notification log entry: {}", e);
+            let log_id = match self.store.append_notification_log(&entry).await {
+                Ok(id) => Some(id),
+                Err(e) => {
+                    tracing::warn!("failed to record notification log entry: {}", e);
+                    None
+                }
+            };
+            if retryable {
+                Arc::clone(self).spawn_retry(ch.clone(), note.clone(), rule.name.clone(), log_id);
             }
+        }
+    }
+
+    /// Keep re-sending a delivery that failed for a transient reason, amending
+    /// its log entry with the eventual outcome.
+    fn spawn_retry(
+        self: Arc<Self>,
+        channel: NotificationChannelDto,
+        note: Notification,
+        rule_name: String,
+        log_id: Option<i64>,
+    ) {
+        tokio::spawn(async move {
+            let mut last_error = String::new();
+            for (i, delay) in RETRY_DELAYS.iter().enumerate() {
+                tokio::time::sleep(*delay).await;
+                let attempt = i + 2; // the inline send was attempt 1
+                match channels::send(&self.http, &channel, &note).await {
+                    Ok(()) => {
+                        tracing::info!(
+                            "notification '{}' delivered via '{}' on attempt {}",
+                            rule_name,
+                            channel.name,
+                            attempt
+                        );
+                        self.amend_log(
+                            log_id,
+                            true,
+                            Some(&format!("delivered on attempt {}", attempt)),
+                        )
+                        .await;
+                        return;
+                    }
+                    Err(e) => {
+                        last_error = e.to_string();
+                        tracing::warn!(
+                            "notification '{}' via channel '{}' attempt {} failed: {}",
+                            rule_name,
+                            channel.name,
+                            attempt,
+                            last_error
+                        );
+                        if !e.retryable {
+                            break;
+                        }
+                    }
+                }
+            }
+            self.amend_log(
+                log_id,
+                false,
+                Some(&format!("{} (gave up after retrying)", last_error)),
+            )
+            .await;
+        });
+    }
+
+    async fn amend_log(&self, log_id: Option<i64>, ok: bool, error: Option<&str>) {
+        let Some(id) = log_id else { return };
+        if let Err(e) = self
+            .store
+            .update_notification_log_result(id, ok, error)
+            .await
+        {
+            tracing::warn!("failed to update notification log entry: {}", e);
         }
     }
 }

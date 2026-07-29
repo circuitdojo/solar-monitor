@@ -4,6 +4,30 @@ All notable changes to Solar Monitor are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.4] - 2026-07-29
+
+### Fixed
+
+- Notifications that fail for a transient reason are now retried instead of
+  dropped. A grid outage takes the router down with it, so the grid-lost
+  alert — the one that matters most — was the one that could not leave the
+  house, while the later grid-restored alert sailed through. Delivery
+  failures are now classified: transport errors (DNS, connect, TLS,
+  timeout), HTTP 408/429/5xx, and non-permanent SMTP errors retry on a
+  30 s / 1 m / 2 m / 5 m / 10 m / 10 m / 10 m backoff (~38 min); config
+  errors and other 4xx responses (bad token, missing key) are permanent and
+  are not retried.
+- Notification log entries record the full error cause chain. A failure that
+  never reached the service read as `pushover request failed` with no
+  indication that the network, not Pushover, was at fault.
+
+### Changed
+
+- The notification log shows the outcome of a retried delivery: the first
+  failure appears immediately, then the entry flips to success with
+  `delivered on attempt N`, or to `<error> (gave up after retrying)` once
+  the backoff is exhausted.
+
 ## [0.4.3] - 2026-07-13
 
 ### Changed
