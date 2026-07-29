@@ -4,6 +4,23 @@ All notable changes to Solar Monitor are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.5] - 2026-07-29
+
+### Fixed
+
+- Battery power was reported ten times too low. `BatCurrent_BMS` (input
+  register 98) was decoded at 0.01 A/LSB instead of 0.1, so a 530 W charge
+  after a grid outage showed as 56 W. Caught on live hardware: with grid
+  and PV at zero and ~490 W on the EPS output, the battery — the only
+  possible source — read 1.06 A instead of ~10.6 A.
+
+### Changed
+
+- The dashboard battery flow reads `Pcharge`/`Pdischarge` (input registers
+  10 and 11), which the inverter reports in watts, instead of inferring
+  power from battery voltage × current. Both are exposed as the
+  `battery_charge_power` and `battery_discharge_power` custom metrics.
+
 ## [0.4.4] - 2026-07-29
 
 ### Fixed
