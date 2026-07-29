@@ -1215,7 +1215,9 @@ fn decode_metrics(blocks: &InputBlocks) -> DeviceMetrics {
         (u16le(&b2[36..38]) as u32 | ((u16le(&b2[38..40]) as u32) << 16)) as f64 / 10.0;
 
     // BMS current and cell stats (b3)
-    let bat_current_bms = i16le(&b3[36..38]) as f64 / 100.0;
+    // BatCurrent_BMS is 0.1 A/LSB (verified against Pcharge/Pdischarge on a
+    // live off-grid load: 0.01 understates battery power by 10x).
+    let bat_current_bms = i16le(&b3[36..38]) as f64 / 10.0;
     let max_cell_v = u16le(&b3[42..44]) as f64 / 1000.0;
     let min_cell_v = u16le(&b3[44..46]) as f64 / 1000.0;
     let max_cell_t = i16le(&b3[46..48]) as f64 / 10.0;
@@ -1258,6 +1260,14 @@ fn decode_metrics(blocks: &InputBlocks) -> DeviceMetrics {
         device_temperature_celsius: Some(tinner),
         ..Default::default()
     };
+    // Pcharge/Pdischarge (input regs 10/11) are watts straight from the
+    // inverter — the authoritative battery power, no V*I inference needed.
+    metrics
+        .custom_metrics
+        .insert("battery_charge_power".into(), pcharge);
+    metrics
+        .custom_metrics
+        .insert("battery_discharge_power".into(), pdis);
     metrics.custom_metrics.insert("pv1_power".into(), ppv1);
     metrics.custom_metrics.insert("pv2_power".into(), ppv2);
     metrics.custom_metrics.insert("pv3_power".into(), ppv3);
@@ -1525,7 +1535,7 @@ mod tests {
             (24, 45), // tinner = 45 C
             (37, 0),  // reg 77 bit0 = 0: grid, not generator
         ]);
-        let b3 = block_from_regs(&[(18, 250)]); // BMS current = 2.5 A
+        let b3 = block_from_regs(&[(18, 250)]); // BMS current = 25.0 A
         let b4 = block_from_regs(&[]);
         let b5 = block_from_regs(&[(10, 650)]); // pload = 650 W
 
@@ -1540,7 +1550,7 @@ mod tests {
         assert_eq!(m.grid_frequency, Some(59.98));
         assert_eq!(m.pv_power_watts, Some(1200.0));
         assert_eq!(m.output_power_watts, Some(650.0));
-        assert_eq!(m.battery_current, Some(2.5));
+        assert_eq!(m.battery_current, Some(25.0));
         assert_eq!(m.device_temperature_celsius, Some(45.0));
         // Grid input: generator metrics must be gated off
         assert_eq!(m.custom_metrics.get("ac_input_is_generator"), Some(&0.0));

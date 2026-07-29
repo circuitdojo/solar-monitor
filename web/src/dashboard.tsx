@@ -340,7 +340,8 @@ function FlowStrip({ s }: { s: Sample }) {
   const pvW = s.pv ?? 0
   const imp = s.custom['import_power'] ?? 0
   const exp = s.custom['export_power'] ?? 0
-  const battW = s.vbat != null && s.ibat != null ? s.vbat * s.ibat : null
+  // Inverter reports charge/discharge power in watts directly; positive = charging.
+  const battW = (s.custom['battery_charge_power'] ?? 0) - (s.custom['battery_discharge_power'] ?? 0)
   const node = (color: string, name: string, detail: string) => (
     <div class="flex items-center gap-2">
       <span class="inline-block rounded-full" style={{ width: '10px', height: '10px', background: color }} />
@@ -361,7 +362,7 @@ function FlowStrip({ s }: { s: Sample }) {
       {node(
         'var(--vz-batt)',
         'Battery',
-        battW == null ? '—' : Math.abs(battW) < 15 ? 'idle' : battW > 0 ? `charging ${fmtW(battW)}` : `discharging ${fmtW(-battW)}`,
+        Math.abs(battW) < 15 ? 'idle' : battW > 0 ? `charging ${fmtW(battW)}` : `discharging ${fmtW(-battW)}`,
       )}
       {s.custom['ac_input_is_generator'] === 1 && (
         <>
