@@ -172,6 +172,26 @@ cargo fmt
 cargo clippy --workspace --all-features
 ```
 
+## CI
+
+`.forgejo/workflows/ci.yml` runs on pushes to `master`, pull requests, and
+manual dispatch: `rust` (fmt, clippy, tests), `frontend` (type-check, build,
+generated-bindings diff gate), `pi` (aarch64 release build with the frontend
+embedded, uploaded as the `solar-monitor-aarch64-linux` artifact), and `audit`
+(cargo + npm advisories).
+
+Jobs run in an image built by hand on the runner host — it is not built by a
+workflow:
+
+```sh
+docker build -t solar-monitor-ci:latest ci/
+```
+
+Caches are named volumes (`solar-monitor-*`) rather than `actions/cache`; each
+must be listed in the runner host's `valid_volumes` or the job silently runs
+with a cold cache. Advisory ignores, with rationale, live in
+`.cargo/audit.toml`.
+
 ## License
 
 GPL-3.0-or-later — see [LICENSE](LICENSE).

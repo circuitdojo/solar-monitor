@@ -1,0 +1,12 @@
+# cargo-audit policy for the CI `audit` job. Every entry needs a reachability
+# rationale — an ignore without one is just a muted alarm.
+
+[advisories]
+ignore = [
+    # RUSTSEC-2023-0071 — Marvin attack (timing sidechannel) in `rsa`, no
+    # fixed version available. Reaches the tree only through sqlx-mysql, which
+    # sqlx compiles unconditionally as part of its macro crate; this app opens
+    # SQLite only and never constructs a MySQL connection, so the RSA
+    # handshake code is never executed.
+    "RUSTSEC-2023-0071",
+]

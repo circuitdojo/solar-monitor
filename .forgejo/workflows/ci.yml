@@ -1,0 +1,173 @@
+# solar-monitor CI. Everything here should finish in a few minutes on a warm
+# cache; the pi cross-build is the slow one and runs in parallel with the rest.
+#
+# Jobs run in the solar-monitor-ci image (ci/Dockerfile), built once on the
+# runner host: `docker build -t solar-monitor-ci:latest ci/`. The runner execs
+# JavaScript actions (actions/checkout) inside the job container, so the
+# image must carry node — a stock rust image fails before the first step.
+#
+# Named volumes (not actions/cache) hold the cargo registry, target dirs and
+# npm cache — a Rust target dir is far too big to tar up and re-download each
+# run. NOTE: volume names must be allowed by the runner host's `valid_volumes`
+# config (solar-monitor-*) or jobs silently get a cold cache every run.
+name: CI
+
+# Forgejo Actions mail is opt-in per workflow file; there is no instance- or
+# user-level switch, so this key has to be here to get failure/recovery mail.
+enable-email-notifications: true
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    runs-on: docker
+    container:
+      image: solar-monitor-ci:latest
+      options: >-
+        --volume solar-monitor-cargo-registry:/usr/local/cargo/registry
+        --volume solar-monitor-cargo-target:/build-target
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create web/dist placeholder
+        # --all-features turns on `embed-frontend`, whose #[derive(RustEmbed)]
+        # (api/src/lib.rs, #[folder = "../web/dist/"]) fails to compile when
+        # web/dist is absent — and web/dist is gitignored. The frontend job
+        # builds the real bundle; an empty directory is enough to lint and
+        # test the backend.
+        run: mkdir -p web/dist && touch web/dist/index.html
+
+      - name: cargo fmt
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-features --all-targets -- -D warnings
+
+      - name: cargo test
+        # sqlx here is runtime queries against bundled SQLite (no query!
+        # macros), so there is no database service and no DATABASE_URL or
+        # SQLX_OFFLINE to set — storage tests provision their own temp files.
+        run: cargo test --workspace
+
+  frontend:
+    runs-on: docker
+    container:
+      image: solar-monitor-ci:latest
+      # Its own target volume: this job runs cargo too (export_types), and two
+      # concurrent cargo processes sharing a target dir serialise on the
+      # build-directory lock — spending exactly the parallelism two jobs buy.
+      options: >-
+        --volume solar-monitor-cargo-registry:/usr/local/cargo/registry
+        --volume solar-monitor-types-target:/build-target
+        --volume solar-monitor-npm-cache:/npm-cache
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: npm ci
+        working-directory: web
+        run: npm ci
+
+      - name: Build frontend
+        # `npm run build` is tsc + vite: this is the type-check gate as well as
+        # the bundle that the Pi binary embeds.
+        working-directory: web
+        run: npm run build
+
+      - name: Generated TypeScript types are current
+        # A diff means someone changed a contracts DTO without running
+        # `just types` — the checked-in bindings no longer match Rust.
+        run: |
+          cargo run -p contracts --bin export_types
+          git diff --exit-code -- types/ts/index.ts
+
+  pi:
+    # Builds the actual deliverable: release profile, real frontend assets
+    # embedded, aarch64-unknown-linux-gnu for the Raspberry Pi.
+    runs-on: docker
+    container:
+      image: solar-monitor-ci:latest
+      options: >-
+        --volume solar-monitor-cargo-registry:/usr/local/cargo/registry
+        --volume solar-monitor-pi-target:/build-target
+        --volume solar-monitor-npm-cache:/npm-cache
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build frontend
+        working-directory: web
+        run: npm ci && npm run build
+
+      - name: Cross-build release binary
+        # Linker (aarch64-linux-gnu-gcc) comes from .cargo/config.toml; the
+        # rustup target is baked into the image.
+        run: |
+          cargo build --release --target aarch64-unknown-linux-gnu \
+            -p solar-monitor --features solar-monitor-api/embed-frontend
+
+      - name: Verify the binary is aarch64 with assets embedded
+        # A silently-bypassed cross toolchain would otherwise produce an x86
+        # binary, and a missed frontend build a UI that 404s — both only
+        # discovered on the Pi.
+        #
+        # grep -c, not grep -q, and the counts captured before they are
+        # tested: steps run under `bash -e -o pipefail`, where `strings BIN |
+        # grep -q` fails on a *successful* match — grep exits at the first hit,
+        # strings dies of SIGPIPE (141), and pipefail promotes that to the
+        # pipeline's status. grep -c drains its input, so nothing gets a
+        # SIGPIPE; it exits 1 on zero matches, hence the `|| true`.
+        #
+        # Path is under /build-target, not target/ — the image sets
+        # CARGO_TARGET_DIR so the cache volume is picked up automatically.
+        run: |
+          BIN=/build-target/aarch64-unknown-linux-gnu/release/solar-monitor
+          arch=$(file "$BIN" | grep -c aarch64 || true)
+          assets=$(strings "$BIN" | grep -c "assets/index-" || true)
+          [ "$arch" -gt 0 ] || { file "$BIN"; echo "not an aarch64 binary" >&2; exit 1; }
+          [ "$assets" -gt 0 ] || { echo "frontend not embedded" >&2; exit 1; }
+          ls -lh "$BIN"
+
+      - name: Upload binary
+        uses: forgejo/upload-artifact@v4
+        with:
+          name: solar-monitor-aarch64-linux
+          path: /build-target/aarch64-unknown-linux-gnu/release/solar-monitor
+          if-no-files-found: error
+
+  audit:
+    # Dependency advisories. Its own job because it is the one check that can
+    # go red without anybody touching the repo — a new advisory is published
+    # and the next run fails. That should not take the build jobs down with it.
+    runs-on: docker
+    container:
+      image: solar-monitor-ci:latest
+      options: >-
+        --volume solar-monitor-cargo-registry:/usr/local/cargo/registry
+        --volume solar-monitor-npm-cache:/npm-cache
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: cargo audit
+        # Policy (which advisories are ignored, and why) lives in
+        # .cargo/audit.toml.
+        run: cargo audit
+
+      - name: npm audit
+        # --omit=dev, unlike the rest of this file's buildmaster lineage: the
+        # dev tree is pinned to vite 5, whose only advisory fix is vite 8 —
+        # a two-major build-tool migration that does not belong to a security
+        # gate. What --omit=dev still covers is everything that reaches a
+        # browser (preact, wouter, signals, clsx). Drop the flag once the vite
+        # upgrade lands, so developer-machine tooling is gated again too.
+        working-directory: web
+        run: npm audit --omit=dev --audit-level=high

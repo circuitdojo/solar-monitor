@@ -62,6 +62,8 @@ cargo fmt && cargo clippy --workspace --all-features   # before every commit
 
 Cross-compile + deploy: `just deploy`, or see README.md ("Building for the Raspberry Pi", "Deploying"). Never ship a Pi/FreeBSD binary built without `--features solar-monitor-api/embed-frontend` — the UI 404s while the API works (this has bitten before; the justfile guards against it).
 
+**CI** is Forgejo Actions only (`.forgejo/workflows/ci.yml`; the GitHub workflows were removed 2026-08-13). Jobs `rust`/`frontend`/`pi`/`audit` run in `solar-monitor-ci:latest`, built by hand on the runner host from `ci/Dockerfile`, caching through named `solar-monitor-*` volumes that the runner's `valid_volumes` must allow. Note CI is stricter than the justfile: `cargo fmt --all -- --check` (non-mutating) and clippy with `--all-targets -- -D warnings`. Deploys are not in CI — `just deploy` stays manual.
+
 ## Conventions
 
 - Rust edition 2021 across crates; async via tokio throughout; errors via anyhow at binary level, `Result` with typed errors in libraries.
