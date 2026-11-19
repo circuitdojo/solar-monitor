@@ -32,3 +32,4 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [features]
 openapi = ["solar-monitor-api/openapi"]
+mock = ["solar-monitor-protocols/mock"]

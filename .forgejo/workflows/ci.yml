@@ -55,7 +55,7 @@ jobs:
         # sqlx here is runtime queries against bundled SQLite (no query!
         # macros), so there is no database service and no DATABASE_URL or
         # SQLX_OFFLINE to set — storage tests provision their own temp files.
-        run: cargo test --workspace
+        run: cargo test --workspace --all-features
 
   frontend:
     runs-on: docker

@@ -20,3 +20,7 @@ chrono = { version = "0.4", features = ["serde"] }
 tokio-modbus = { version = "0.16", features = ["rtu"] }
 once_cell = "1"
 contracts = { path = "../contracts" }
+
+[features]
+# Dev-only synthetic inverter protocol (see src/mock.rs); never in release builds
+mock = []

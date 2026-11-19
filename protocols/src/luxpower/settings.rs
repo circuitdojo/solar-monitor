@@ -11,6 +11,35 @@ use std::sync::Arc;
 
 use crate::transport::modbus_rtu::PortHandle;
 
+/// Holding-register I/O the settings engine runs against: the device's
+/// Modbus port in production, an in-memory bank for the dev mock.
+#[async_trait]
+pub trait HoldingRegisters: Send + Sync {
+    async fn read(&self, start: u16, qty: u16) -> Result<Vec<u16>>;
+    async fn write(&self, reg: u16, value: u16) -> Result<()>;
+}
+
+/// One unit on a shared Modbus port, routed through the per-port actor so
+/// settings I/O never contends with polling on the same bus.
+pub(crate) struct PortRegisters {
+    pub(crate) handle: Arc<PortHandle>,
+    pub(crate) unit_id: u8,
+}
+
+#[async_trait]
+impl HoldingRegisters for PortRegisters {
+    async fn read(&self, start: u16, qty: u16) -> Result<Vec<u16>> {
+        self.handle
+            .read_holding_registers(self.unit_id, start, qty)
+            .await
+    }
+    async fn write(&self, reg: u16, value: u16) -> Result<()> {
+        self.handle
+            .write_single_register(self.unit_id, reg, value)
+            .await
+    }
+}
+
 pub enum Kind {
     /// Whole-register numeric value: raw * scale, clamped to [min, max] (scaled units).
     Number {
@@ -142,11 +171,9 @@ fn dto(
     }
 }
 
-/// Settings access for one LuxPower-map device, routed through the shared
-/// per-port actor so it never contends with polling on the same bus.
+/// Settings access for one LuxPower-map device.
 pub struct LuxPowerSettings {
-    pub(crate) handle: Arc<PortHandle>,
-    pub(crate) unit_id: u8,
+    pub(crate) regs: Arc<dyn HoldingRegisters>,
     pub(crate) table: &'static [SettingDef],
     pub(crate) confirm_keys: &'static [(&'static str, &'static str)],
 }
@@ -184,10 +211,7 @@ impl solar_monitor_core::SettingsAccess for LuxPowerSettings {
         let mut start = 0u16;
         while start <= max_reg {
             let qty = 40.min(max_reg + 1 - start);
-            let block = self
-                .handle
-                .read_holding_registers(self.unit_id, start, qty)
-                .await?;
+            let block = self.regs.read(start, qty).await?;
             for (i, v) in block.iter().enumerate() {
                 vals.insert(start + i as u16, *v);
             }
@@ -225,9 +249,7 @@ impl solar_monitor_core::SettingsAccess for LuxPowerSettings {
                     return Err(anyhow!("{} out of range {}..{}", v, min, max));
                 }
                 let raw = (v / scale).round() as u16;
-                self.handle
-                    .write_single_register(self.unit_id, *reg, raw)
-                    .await?;
+                self.regs.write(*reg, raw).await?;
             }
             Kind::Bit { reg, bit } | Kind::BitChoice { reg, bit, .. } => {
                 let on: bool = match value.trim() {
@@ -237,19 +259,14 @@ impl solar_monitor_core::SettingsAccess for LuxPowerSettings {
                         .parse()
                         .map_err(|_| anyhow!("expected true/false or 0/1"))?,
                 };
-                let cur = self
-                    .handle
-                    .read_holding_registers(self.unit_id, *reg, 1)
-                    .await?[0];
+                let cur = self.regs.read(*reg, 1).await?[0];
                 let new = if on {
                     cur | (1 << bit)
                 } else {
                     cur & !(1 << bit)
                 };
                 if new != cur {
-                    self.handle
-                        .write_single_register(self.unit_id, *reg, new)
-                        .await?;
+                    self.regs.write(*reg, new).await?;
                 }
             }
             Kind::Bits {
@@ -266,16 +283,11 @@ impl solar_monitor_core::SettingsAccess for LuxPowerSettings {
                 if !options.contains(&v) {
                     return Err(anyhow!("{} is not one of {:?}", v, options));
                 }
-                let cur = self
-                    .handle
-                    .read_holding_registers(self.unit_id, *reg, 1)
-                    .await?[0];
+                let cur = self.regs.read(*reg, 1).await?[0];
                 let mask = field_mask(*width) << shift;
                 let new = (cur & !mask) | (v << shift);
                 if new != cur {
-                    self.handle
-                        .write_single_register(self.unit_id, *reg, new)
-                        .await?;
+                    self.regs.write(*reg, new).await?;
                 }
             }
             Kind::Choice { reg, options, .. } => {
@@ -286,9 +298,7 @@ impl solar_monitor_core::SettingsAccess for LuxPowerSettings {
                 if !options.contains(&v) {
                     return Err(anyhow!("{} is not one of {:?}", v, options));
                 }
-                self.handle
-                    .write_single_register(self.unit_id, *reg, v)
-                    .await?;
+                self.regs.write(*reg, v).await?;
             }
             Kind::TimeWindow { start_reg, end_reg } => {
                 let (start, end) = value
@@ -296,12 +306,8 @@ impl solar_monitor_core::SettingsAccess for LuxPowerSettings {
                     .ok_or_else(|| anyhow!("expected HH:MM-HH:MM"))?;
                 let start = parse_time(start)?;
                 let end = parse_time(end)?;
-                self.handle
-                    .write_single_register(self.unit_id, *start_reg, start)
-                    .await?;
-                self.handle
-                    .write_single_register(self.unit_id, *end_reg, end)
-                    .await?;
+                self.regs.write(*start_reg, start).await?;
+                self.regs.write(*end_reg, end).await?;
             }
         }
 
@@ -316,10 +322,7 @@ impl solar_monitor_core::SettingsAccess for LuxPowerSettings {
             Kind::TimeWindow { start_reg, end_reg } => vec![*start_reg, *end_reg],
         };
         for a in addrs {
-            let v = self
-                .handle
-                .read_holding_registers(self.unit_id, a, 1)
-                .await?[0];
+            let v = self.regs.read(a, 1).await?[0];
             vals.insert(a, v);
         }
         let regs = move |addr: u16| -> u16 { *vals.get(&addr).unwrap_or(&0) };

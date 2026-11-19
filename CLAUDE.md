@@ -52,7 +52,7 @@ Dependency direction: `bin` → `api` → {`protocols`, `storage`, `notify`} →
 
 ## Development Commands
 
-Common tasks are in the `justfile` (`just --list`): `just serve` (web build + local serve on 8090), `just test`, `just lint` (fmt + clippy, before every commit), `just types` (TS regen), `just build-pi` / `just deploy` (embed-frontend cross-build → Pi; `build-pi` fails if the frontend didn't get embedded), `just build-freebsd`, `just pi-logs` / `just pi-status`. Underlying commands:
+Common tasks are in the `justfile` (`just --list`): `just serve` (web build + local serve on 8090), `just serve-mock` (same, plus the dev-only `mock` feature: a synthetic "Mock 6000XP (dev)" protocol, `protocols/src/mock.rs`, with a scratch `data/mock.db`; add devices with unit ids 1, 2 to simulate a parallel system), `just test`, `just lint` (fmt + clippy, before every commit), `just types` (TS regen), `just build-pi` / `just deploy` (embed-frontend cross-build → Pi; `build-pi` fails if the frontend didn't get embedded), `just build-freebsd`, `just pi-logs` / `just pi-status`. Underlying commands:
 
 ```sh
 cd web && npm run build            # required before serving locally

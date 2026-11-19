@@ -11,10 +11,16 @@ use std::sync::Arc;
 use solar_monitor_core as core;
 
 pub mod luxpower;
+#[cfg(feature = "mock")]
+pub mod mock;
 pub mod transport;
 
 pub fn registered() -> Vec<&'static str> {
-    vec![luxpower::models::EG4_6000XP.protocol_name]
+    #[allow(unused_mut)]
+    let mut names = vec![luxpower::models::EG4_6000XP.protocol_name];
+    #[cfg(feature = "mock")]
+    names.push(mock::PROTOCOL_NAME);
+    names
 }
 
 pub fn create_registry() -> core::ProtocolRegistry {
@@ -22,5 +28,7 @@ pub fn create_registry() -> core::ProtocolRegistry {
     reg.register_protocol(Arc::new(luxpower::LuxPowerProtocol {
         model: &luxpower::models::EG4_6000XP,
     }));
+    #[cfg(feature = "mock")]
+    reg.register_protocol(Arc::new(mock::MockProtocol::default()));
     reg
 }

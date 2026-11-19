@@ -21,13 +21,18 @@ web:
 serve port="8090": web
     cargo run -p solar-monitor -- --serve --port {{port}}
 
+# Dev server with the synthetic "Mock 6000XP (dev)" protocol and a scratch DB
+# (add devices with unit ids 1, 2, … to simulate a parallel system)
+serve-mock port="8090": web
+    cargo run -p solar-monitor --features mock -- --serve --port {{port}} --db ./data/mock.db
+
 # Regenerate TypeScript bindings from the Rust contracts
 types:
     cargo run -p contracts --bin export_types
 
 # Run the full test suite
 test:
-    cargo test --workspace
+    cargo test --workspace --all-features
 
 # Format + lint (run before every commit)
 lint:

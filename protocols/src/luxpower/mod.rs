@@ -25,7 +25,7 @@ use solar_monitor_core::{
 };
 
 use crate::transport::modbus_rtu::{PortHandle, get_or_spawn_port_actor};
-use settings::{LuxPowerSettings, SettingDef};
+use settings::{LuxPowerSettings, PortRegisters, SettingDef};
 
 /// Five aligned 40-register input blocks (regs 0-199), as little-endian bytes
 /// per register — the layout the decode functions were written against.
@@ -168,8 +168,10 @@ impl DeviceProtocol for LuxPowerProtocol {
         let p = port_params(config, self.model)?;
         let handle = get_or_spawn_port_actor(&p.path, p.baud, p.timeout_secs).await?;
         Ok(Some(Box::new(LuxPowerSettings {
-            handle,
-            unit_id: p.unit_id,
+            regs: Arc::new(PortRegisters {
+                handle,
+                unit_id: p.unit_id,
+            }),
             table: self.model.settings,
             confirm_keys: self.model.confirm_keys,
         })))
