@@ -70,7 +70,19 @@ pub trait DeviceProtocol: Send + Sync {
     /// configurable settings. Implementations expose only curated, validated
     /// settings — never raw register writes.
     async fn settings(&self, config: &DeviceConfig) -> Result<Option<Box<dyn SettingsAccess>>>;
+
+    /// How to merge simultaneous readings from inverters wired in parallel
+    /// into one system view, or `None` if the protocol can't. The function
+    /// receives one reading per member (at least two) and returns the
+    /// combined metrics; which metrics sum and which are shared is
+    /// protocol knowledge, so it lives here rather than in the API.
+    fn parallel_combiner(&self) -> Option<ParallelCombiner> {
+        None
+    }
 }
+
+/// See [`DeviceProtocol::parallel_combiner`].
+pub type ParallelCombiner = fn(&[&DeviceData]) -> DeviceMetrics;
 
 #[async_trait]
 pub trait DeviceConnection: Send + Sync {

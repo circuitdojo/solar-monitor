@@ -10,6 +10,7 @@
 //! holding register to tell them apart.
 
 pub mod models;
+pub mod parallel;
 pub mod settings;
 
 use anyhow::{Result, anyhow};
@@ -19,8 +20,8 @@ use std::sync::Arc;
 
 use solar_monitor_core::{
     DeviceConfig, DeviceConnection, DeviceData, DeviceMetrics, DeviceProtocol, DeviceStatus,
-    DeviceType, DiscoveredDevice, HealthStatus, ProtocolCapabilities, ProtocolMetadata, ScanConfig,
-    SettingsAccess,
+    DeviceType, DiscoveredDevice, HealthStatus, ParallelCombiner, ProtocolCapabilities,
+    ProtocolMetadata, ScanConfig, SettingsAccess,
 };
 
 use crate::transport::modbus_rtu::{PortHandle, get_or_spawn_port_actor};
@@ -172,6 +173,10 @@ impl DeviceProtocol for LuxPowerProtocol {
             table: self.model.settings,
             confirm_keys: self.model.confirm_keys,
         })))
+    }
+
+    fn parallel_combiner(&self) -> Option<ParallelCombiner> {
+        Some(parallel::combine)
     }
 }
 

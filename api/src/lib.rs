@@ -14,6 +14,8 @@ use std::time::Duration;
 use solar_monitor_core as core;
 use tokio::sync::broadcast;
 
+pub mod combined;
+
 #[derive(Serialize)]
 struct HealthResponse {
     status: &'static str,
@@ -58,6 +60,9 @@ pub struct AppState {
     pub tasks: tokio::sync::Mutex<HashMap<String, tokio::task::JoinHandle<()>>>,
     pub devices: tokio::sync::Mutex<HashMap<String, core::DeviceConfig>>, // in-memory device registry
     pub tx: broadcast::Sender<contracts::DeviceData>,
+    /// Combined parallel-system readings (see [`combined`]); kept off `tx`
+    /// so storage and notifications only ever see real devices.
+    pub combined_tx: broadcast::Sender<contracts::DeviceData>,
     pub notifier: Arc<solar_monitor_notify::Notifier>,
     pub started_at: chrono::DateTime<chrono::Utc>,
 }
@@ -86,6 +91,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/v1/devices/export", get(export_devices))
         .route("/api/v1/devices/import", post(import_devices))
         .route("/api/v1/data/dashboard", get(dashboard_data))
+        .route("/api/v1/combined", get(combined_info))
+        .route("/api/v1/combined/data", get(get_combined_data_range))
         .route(
             "/api/v1/notifications/channels",
             get(list_notification_channels).post(upsert_notification_channel),
@@ -143,6 +150,7 @@ struct WsEnvelope<T> {
 
 async fn handle_ws(state: Arc<AppState>, mut socket: WebSocket) {
     let mut rx = state.tx.subscribe();
+    let mut combined_rx = state.combined_tx.subscribe();
     // Basic loop: forward device data to client as JSON
     loop {
         tokio::select! {
@@ -154,6 +162,17 @@ async fn handle_ws(state: Arc<AppState>, mut socket: WebSocket) {
                             && socket.send(Message::Text(text.into())).await.is_err() { break; }
                     }
                     Err(_) => break,
+                }
+            }
+            msg = combined_rx.recv() => {
+                match msg {
+                    Ok(data) => {
+                        let env = WsEnvelope { message_type: "combined_data", timestamp: Utc::now().to_rfc3339(), data };
+                        if let Ok(text) = serde_json::to_string(&env)
+                            && socket.send(Message::Text(text.into())).await.is_err() { break; }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
                 }
             }
             _ = tokio::time::sleep(Duration::from_secs(30)) => {
@@ -627,11 +646,10 @@ struct RangeQuery {
     limit: Option<u32>,
 }
 
-async fn get_device_data_range(
-    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
-    axum::extract::Path(id): axum::extract::Path<String>,
-    axum::extract::Query(q): axum::extract::Query<RangeQuery>,
-) -> ApiResult<Json<Vec<contracts::DeviceData>>> {
+/// `[start, end]` from a range query; defaults to the last hour.
+fn parse_range(
+    q: &RangeQuery,
+) -> ApiResult<(chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>)> {
     let end = q
         .end
         .as_deref()
@@ -646,12 +664,68 @@ async fn get_device_data_range(
         .transpose()
         .map_err(|_| ApiError::BadRequest("invalid start timestamp".into()))?
         .unwrap_or_else(|| end - chrono::Duration::hours(1));
+    Ok((start, end))
+}
+
+async fn get_device_data_range(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    axum::extract::Query(q): axum::extract::Query<RangeQuery>,
+) -> ApiResult<Json<Vec<contracts::DeviceData>>> {
+    let (start, end) = parse_range(&q)?;
     let data = state
         .store
         .get_device_data_range(&id, start, end, q.limit)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
     Ok(Json(data))
+}
+
+async fn combined_info(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+) -> Json<contracts::CombinedInfoDto> {
+    let resolved = combined::resolve(&*state.devices.lock().await, &state.registry);
+    Json(match resolved {
+        Ok(sys) => {
+            let mut member_ids: Vec<String> = sys.poll_secs.into_keys().collect();
+            member_ids.sort();
+            contracts::CombinedInfoDto {
+                available: true,
+                member_ids,
+                reason: None,
+            }
+        }
+        Err(reason) => contracts::CombinedInfoDto {
+            available: false,
+            member_ids: Vec::new(),
+            reason: Some(reason),
+        },
+    })
+}
+
+/// Combined history: each member's stored range, merged in time order and
+/// run through the same accumulator as the live stream.
+async fn get_combined_data_range(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+    axum::extract::Query(q): axum::extract::Query<RangeQuery>,
+) -> ApiResult<Json<Vec<contracts::DeviceData>>> {
+    let (start, end) = parse_range(&q)?;
+    let sys = combined::resolve(&*state.devices.lock().await, &state.registry)
+        .map_err(ApiError::BadRequest)?;
+    let mut rows = Vec::new();
+    for id in sys.poll_secs.keys() {
+        rows.extend(
+            state
+                .store
+                .get_device_data_range(id, start, end, q.limit)
+                .await
+                .map_err(|e| ApiError::Internal(e.to_string()))?,
+        );
+    }
+    rows.sort_by_key(|d| d.timestamp);
+    let mut acc = combined::CombinedAccumulator::default();
+    let out: Vec<_> = rows.into_iter().filter_map(|d| acc.push(d, &sys)).collect();
+    Ok(Json(out))
 }
 
 async fn dashboard_data(

@@ -120,6 +120,26 @@ If you jump back to the **Dashboard**, you should see some data!
 We don't have any PV here yet, but if you do, you'll see that information
 as well.
 
+### Parallel inverters
+
+If you run two or more inverters in parallel, connect a USB-RS485 adapter
+to the dongle port of **each** inverter and add each one as its own device.
+(Discovery only finds the first inverter on a given adapter, so one adapter
+per inverter is the simple path.)
+
+Once at least two inverters are enabled, the **Dashboard** device menu gains
+an **All inverters (combined)** option. Solar, load, battery charge and
+discharge, grid import/export and the daily energy totals are added up
+across inverters. Battery state of charge, voltages and grid frequency are
+shared, so they're averaged instead. The combined view only updates once
+every inverter has reported, so if one inverter stops responding, the
+combined view goes stale instead of showing a partial total.
+
+The combined view treats every enabled device as part of one parallel
+system. Notification rules still run per inverter: a rule set to "any
+device" fires once for each inverter, so point grid and battery rules at a
+single inverter if you want one alert per event.
+
 ### Changing settings
 
 Most of the known settings of the 6000XP can be changed under

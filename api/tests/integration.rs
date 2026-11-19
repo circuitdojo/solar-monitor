@@ -28,6 +28,7 @@ async fn test_state(_db_path: &str) -> Arc<api::AppState> {
         tasks: tokio::sync::Mutex::new(std::collections::HashMap::new()),
         devices: tokio::sync::Mutex::new(std::collections::HashMap::new()),
         tx,
+        combined_tx: tokio::sync::broadcast::channel(16).0,
         notifier,
         started_at: chrono::Utc::now(),
     })
@@ -130,6 +131,7 @@ async fn test_state_with_mock() -> Arc<api::AppState> {
         tasks: tokio::sync::Mutex::new(std::collections::HashMap::new()),
         devices: tokio::sync::Mutex::new(std::collections::HashMap::new()),
         tx,
+        combined_tx: tokio::sync::broadcast::channel(16).0,
         notifier,
         started_at: chrono::Utc::now(),
     })
@@ -737,4 +739,79 @@ async fn dashboard_includes_latest_data() {
     assert!(!arr.is_empty());
     let first = arr.iter().find(|x| x["deviceId"] == cfg.id).unwrap();
     assert_eq!(first["deviceId"], cfg.id);
+}
+
+#[tokio::test]
+async fn combined_info_and_history() {
+    let state = test_state(":memory:").await;
+    let app = api::router(state.clone());
+
+    // One enabled device: no combined system
+    let res = get(&app, "/api/v1/combined").await;
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["available"], false);
+    assert!(v["reason"].is_string());
+    let res = get(&app, "/api/v1/combined/data").await;
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+
+    // Two enabled devices of a combinable protocol (registered directly, so
+    // no serial polling starts), each with interleaved stored readings.
+    let proto = state.registry.protocols().next().unwrap().protocol_name();
+    for id in ["inv1", "inv2"] {
+        let cfg = core::DeviceConfig {
+            id: id.into(),
+            name: id.into(),
+            device_type: dto::DeviceType::SolarInverter,
+            protocol: proto.into(),
+            connection_params: std::collections::HashMap::new(),
+            enabled: true,
+            poll_interval_seconds: 10,
+        };
+        state.devices.lock().await.insert(id.into(), cfg);
+    }
+    let base = chrono::Utc::now() - chrono::Duration::minutes(5);
+    for (id, offset, pv, soc) in [
+        ("inv1", 0, 1000.0, 80.0),
+        ("inv2", 3, 500.0, 82.0),
+        ("inv1", 10, 1100.0, 80.0),
+        ("inv2", 13, 600.0, 82.0),
+    ] {
+        let ts = base + chrono::Duration::seconds(offset);
+        let d = dto::DeviceData {
+            device_id: id.into(),
+            timestamp: ts,
+            device_type: dto::DeviceType::SolarInverter,
+            metrics: dto::DeviceMetrics {
+                pv_power_watts: Some(pv),
+                battery_soc_percentage: Some(soc),
+                ..Default::default()
+            },
+            status: dto::DeviceStatus {
+                is_connected: true,
+                last_seen: ts,
+                health: dto::HealthStatus::Healthy,
+                error_message: None,
+            },
+            raw_data: None,
+        };
+        state.store.store_device_data(&d).await.unwrap();
+    }
+
+    let res = get(&app, "/api/v1/combined").await;
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["available"], true);
+    assert_eq!(v["memberIds"], json!(["inv1", "inv2"]));
+
+    let res = get(&app, "/api/v1/combined/data").await;
+    assert!(res.status().is_success());
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let arr = v.as_array().unwrap();
+    assert_eq!(arr.len(), 2);
+    assert_eq!(arr[0]["deviceId"], "combined");
+    assert_eq!(arr[0]["metrics"]["pvPowerWatts"], 1500.0);
+    assert_eq!(arr[0]["metrics"]["batterySocPercentage"], 81.0);
+    assert_eq!(arr[1]["metrics"]["pvPowerWatts"], 1700.0);
 }

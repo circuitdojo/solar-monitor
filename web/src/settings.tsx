@@ -135,7 +135,7 @@ function TimeWindowInput({ draft, onChange }: { draft: string; onChange: (d: str
 export function SettingsPage() {
   const { devices, error: devicesError } = useDevices()
   const settable = useMemo(() => (devices || []).filter(d => d.supportsSettings), [devices])
-  const { device, select } = useDeviceSelection(devices ? settable : null)
+  const { device, select } = useDeviceSelection('selectedDeviceId', devices ? settable : null)
   const [settings, setSettings] = useState<DeviceSettingDto[] | null>(null)
   const [settingsError, setSettingsError] = useState<string | null>(null)
   const error = devicesError || settingsError
@@ -177,7 +177,7 @@ export function SettingsPage() {
     <PageShell
       header={
         <>
-          <PageTitle>Inverter Settings{device ? ` — ${device.name}` : ''}</PageTitle>
+          <PageTitle>Inverter Settings</PageTitle>
           <DeviceSelect devices={settable} selected={deviceId} onSelect={select} />
         </>
       }

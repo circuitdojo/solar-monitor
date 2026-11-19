@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { DeviceData } from '../../types/ts'
-import { DeviceSelect, useDeviceSelection, useDevices } from './device-select'
+import { COMBINED_ID, DeviceSelect, combinedLabel, useCombinedInfo, useDeviceSelection, useDevices } from './device-select'
 import { PageShell, PageTitle } from './layout'
 
 // One polled reading, flattened for charting
@@ -35,6 +35,8 @@ function toSample(d: DeviceData): Sample {
   }
 }
 
+// `deviceId` may be COMBINED_ID: the backend's synthesized parallel-system
+// reading, with its own history endpoint and WS message type.
 function useLiveData(deviceId: string | null) {
   const [samples, setSamples] = useState<Sample[]>([])
   const [wsUp, setWsUp] = useState(false)
@@ -52,7 +54,12 @@ function useLiveData(deviceId: string | null) {
 
     async function init() {
       try {
-        const hist: DeviceData[] = await fetch(`/api/v1/devices/${deviceId}/data?limit=${BUFFER}`).then(r => r.json())
+        const url = deviceId === COMBINED_ID
+          ? `/api/v1/combined/data?limit=${BUFFER}`
+          : `/api/v1/devices/${deviceId}/data?limit=${BUFFER}`
+        const res = await fetch(url)
+        if (!res.ok) throw new Error(`${res.status} ${(await res.json().catch(() => null))?.details ?? res.statusText}`)
+        const hist: DeviceData[] = await res.json()
         if (cancelled) return
         setSamples(hist.map(toSample).sort((a, b) => a.t - b.t))
         connect()
@@ -68,7 +75,8 @@ function useLiveData(deviceId: string | null) {
       ws.onmessage = ev => {
         try {
           const env = JSON.parse(ev.data)
-          if (env.messageType !== 'device_data' || env.data?.deviceId !== deviceId) return
+          const wanted = deviceId === COMBINED_ID ? 'combined_data' : 'device_data'
+          if (env.messageType !== wanted || env.data?.deviceId !== deviceId) return
           const s = toSample(env.data as DeviceData)
           setSamples(prev => [...prev.filter(p => p.t !== s.t), s].slice(-BUFFER))
         } catch { /* heartbeat or malformed frame */ }
@@ -383,8 +391,12 @@ function FlowStrip({ s }: { s: Sample }) {
 
 export function DashboardPage() {
   const { devices, error: devicesError } = useDevices()
-  const { device, select } = useDeviceSelection(devices)
-  const { samples, wsUp, error: dataError } = useLiveData(device?.id ?? null)
+  const combinedInfo = useCombinedInfo()
+  const { device, combined: combinedSelected, select } = useDeviceSelection('dashboardSelection', devices, !!combinedInfo?.available)
+  // Hold off until we know whether the combined view is available, so the
+  // combined default doesn't first load a single device.
+  const selectedId = combinedInfo === undefined ? null : combinedSelected ? COMBINED_ID : device?.id ?? null
+  const { samples, wsUp, error: dataError } = useLiveData(selectedId)
   const error = devicesError || dataError
   const latest = samples.length ? samples[samples.length - 1] : null
   const stale = latest ? Date.now() - latest.t > 30_000 : true
@@ -425,8 +437,13 @@ export function DashboardPage() {
     <PageShell
       header={
         <>
-          <PageTitle>{device?.name || 'Solar Monitor'}</PageTitle>
-          <DeviceSelect devices={devices || []} selected={device?.id ?? null} onSelect={select} />
+          <PageTitle>Dashboard</PageTitle>
+          <DeviceSelect
+            devices={combinedInfo === undefined ? [] : devices || []}
+            selected={selectedId}
+            onSelect={select}
+            combinedLabel={combinedInfo?.available ? combinedLabel(combinedInfo) : undefined}
+          />
           <span
             class="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full"
             style={{
@@ -443,9 +460,9 @@ export function DashboardPage() {
       }
     >
       {error && <Card><div style={{ color: 'var(--vz-crit)' }}>Error: {error}</div></Card>}
-      {!error && devices != null && !device && <Card><div style={{ color: 'var(--vz-ink-2)' }}>No devices configured yet — add one on the Devices page.</div></Card>}
+      {!error && devices != null && !selectedId && combinedInfo !== undefined && <Card><div style={{ color: 'var(--vz-ink-2)' }}>No devices configured yet — add one on the Devices page.</div></Card>}
 
-      {device && (
+      {selectedId && (
         <>
           <div class="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
             <StatTile

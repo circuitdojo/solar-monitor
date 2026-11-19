@@ -25,6 +25,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     out.push_str("\n\n");
     out.push_str(&ts::export::<DeviceData>(&conf)?);
     out.push_str("\n\n");
+    out.push_str(&ts::export::<CombinedInfoDto>(&conf)?);
+    out.push_str("\n\n");
     out.push_str(&ts::export::<DeviceConfigDto>(&conf)?);
     out.push_str("\n\n");
     out.push_str(&ts::export::<AddDeviceRequestDto>(&conf)?);

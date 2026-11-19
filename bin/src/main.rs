@@ -94,6 +94,7 @@ async fn main() -> Result<()> {
         tasks: tokio::sync::Mutex::new(std::collections::HashMap::new()),
         devices: tokio::sync::Mutex::new(std::collections::HashMap::new()),
         tx,
+        combined_tx: tokio::sync::broadcast::channel(100).0,
         notifier,
         started_at: chrono::Utc::now(),
     });
@@ -153,6 +154,9 @@ async fn main() -> Result<()> {
         }
         return Ok(());
     }
+
+    // Parallel-system combiner (one combined reading per poll round)
+    solar_monitor_api::combined::spawn(state.clone());
 
     // Auto-start polling for persisted, enabled devices
     {

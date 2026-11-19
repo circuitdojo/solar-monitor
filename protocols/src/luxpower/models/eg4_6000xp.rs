@@ -1223,6 +1223,11 @@ fn decode_metrics(blocks: &InputBlocks) -> DeviceMetrics {
     let max_cell_t = i16le(&b3[46..48]) as f64 / 10.0;
     let min_cell_t = i16le(&b3[48..50]) as f64 / 10.0;
     let cycles_bms = u16le(&b3[52..54]) as f64;
+    // Input reg 113: bits 0-1 MasterOrSlave (1 primary, 2 secondary),
+    // bits 8-15 ParallelNum (inverters in the parallel system).
+    let parallel = u16le(&b3[66..68]);
+    let parallel_role = (parallel & 0x3) as f64;
+    let parallel_count = (parallel >> 8) as f64;
 
     // Generator and EPS (b4)
     let gen_v = u16le(&b4[2..4]) as f64 / 10.0;
@@ -1393,6 +1398,12 @@ fn decode_metrics(blocks: &InputBlocks) -> DeviceMetrics {
         .custom_metrics
         .insert("bms_cycles".into(), cycles_bms);
     metrics.custom_metrics.insert("battery_soh".into(), soh);
+    metrics
+        .custom_metrics
+        .insert("parallel_role".into(), parallel_role);
+    metrics
+        .custom_metrics
+        .insert("parallel_count".into(), parallel_count);
     metrics.custom_metrics.insert(
         "ac_input_is_generator".into(),
         if ac_input_is_gen { 1.0 } else { 0.0 },

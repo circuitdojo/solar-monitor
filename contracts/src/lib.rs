@@ -75,6 +75,16 @@ pub struct DeviceData {
     pub raw_data: Option<String>,
 }
 
+/// Whether the enabled devices form a combinable parallel system
+/// (`GET /api/v1/combined`). When `available` is false, `reason` says why.
+#[derive(Type, Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CombinedInfoDto {
+    pub available: bool,
+    pub member_ids: Vec<String>,
+    pub reason: Option<String>,
+}
+
 // Optional: Basic config DTO used for persistence/API
 #[derive(Type, Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

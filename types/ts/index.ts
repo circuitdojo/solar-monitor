@@ -8,6 +8,12 @@ export type DeviceMetrics = { inputPowerWatts: number | null; outputPowerWatts: 
 
 export type DeviceData = { deviceId: string; timestamp: string; deviceType: DeviceType; metrics: DeviceMetrics; status: DeviceStatus; rawData: string | null }
 
+/**
+ * Whether the enabled devices form a combinable parallel system
+ * (`GET /api/v1/combined`). When `available` is false, `reason` says why.
+ */
+export type CombinedInfoDto = { available: boolean; memberIds: string[]; reason: string | null }
+
 export type DeviceConfigDto = { id: string; name: string; deviceType: DeviceType; protocolName: string; enabled: boolean; pollIntervalSeconds: number; connectionParams: { [key: string]: string } }
 
 /**
