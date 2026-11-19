@@ -4,6 +4,30 @@ All notable changes to Solar Monitor are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.0-rc.1] - 2026-11-18
+
+### Added
+
+- Combined view for inverters wired in parallel. With two or more enabled
+  inverters, the dashboard defaults to a "System (N inverters)" view: PV,
+  load, battery charge/discharge, grid import/export and daily energy are
+  summed across units; battery SOC, voltages and grid frequency are
+  averaged; temperatures show the hottest unit. The view only updates once
+  every inverter has reported, so a missing inverter stalls it instead of
+  showing a partial total. Live over the WebSocket (`combined_data`) and as
+  history from `GET /api/v1/combined/data`. Experimental: whether load and
+  grid import/export are per-unit on a real parallel install is unconfirmed.
+- The 6000XP reports its parallel role and inverter count (input register
+  113) as the `parallel_role` and `parallel_count` custom metrics.
+- Dev-only `mock` feature (`just serve-mock`): a synthetic inverter protocol,
+  including settings, for UI work without hardware. Never in release builds.
+
+### Changed
+
+- The dashboard has a fixed "Dashboard" title with a device dropdown, and
+  the Settings title no longer repeats the device name. Dashboard and
+  Settings remember their device selection independently.
+
 ## [0.4.6] - 2026-07-29
 
 ### Fixed
