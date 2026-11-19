@@ -22,6 +22,13 @@ project adheres to [Semantic Versioning](https://semver.org/).
 - Dev-only `mock` feature (`just serve-mock`): a synthetic inverter protocol,
   including settings, for UI work without hardware. Never in release builds.
 
+### Security
+
+- Dependency advisories fixed: lettre, quinn, rustls, rustls-webpki and
+  webpki-roots updated within semver; sqlx 0.8 → 0.9.1 so the bundled SQLite
+  is 3.54 (RUSTSEC-2026-0459). Existing databases open unchanged. sqlx no
+  longer compiles the MySQL driver, so the `rsa` audit ignore is gone.
+
 ### Changed
 
 - The dashboard has a fixed "Dashboard" title with a device dropdown, and
