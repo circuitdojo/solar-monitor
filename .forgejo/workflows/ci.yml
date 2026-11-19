@@ -24,6 +24,15 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Cargo's automatic cache GC must stay off here. Its last-use database
+  # lives in $CARGO_HOME/.global-cache, which is baked into the image, not on
+  # the shared registry volume — so every fresh job container believes the
+  # crates from image build time (cargo-audit's deps) went unused for months,
+  # runs GC, and deletes their sources from the shared volume while the other
+  # jobs are compiling them (rustc "never executed: No such file or
+  # directory"). The volume therefore never self-prunes; remove it by hand
+  # when it gets large.
+  CARGO_CACHE_AUTO_CLEAN_FREQUENCY: never
 
 jobs:
   rust:
